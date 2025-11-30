@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include "ASTVisitor.h"
+#include "Type.h"
 
 // AST节点基类：所有AST节点都继承它，支持Visitor模式（后续遍历AST用）
 class ASTNode
@@ -47,7 +48,7 @@ public:
     std::string name;                  // 变量名
     std::unique_ptr<Type> type;        // 变量类型
     std::unique_ptr<ASTNode> initExpr; // 初始化表达式
-    void accept(ASTVisitor &visitor) override { visitor.visitVar(this); }
+    void accept(ASTVisitor &visitor) override { visitor.visitConstVar(this); }
 };
 
 // 4. 表达式节点（常数表达式、算术表达式）

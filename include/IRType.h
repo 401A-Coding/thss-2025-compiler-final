@@ -1,4 +1,5 @@
 // include/IRType.h（复用之前的类型系统，或简化版）
+#pragma once
 #include <string>
 class IRType
 {

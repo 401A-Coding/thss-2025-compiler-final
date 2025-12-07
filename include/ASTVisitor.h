@@ -1,5 +1,6 @@
 // include/ASTVisitor.h
 #pragma once
+#include "ASTNode.h"
 
 // AST Visitor基类（后续遍历AST做类型检查、IR生成时继承它）
 class ASTVisitor

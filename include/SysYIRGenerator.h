@@ -15,13 +15,6 @@ public:
     // 编译单元入口
     std::any visitCompUnit(SysYParser::CompUnitContext *ctx) override;
 
-    // 最小实现：函数定义、块、return语句、数字表达式
-    std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
-    std::any visitBlock(SysYParser::BlockContext *context) override;
-    std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
-    std::any visitNumberPrimaryExp(SysYParser::NumberPrimaryExpContext *context) override;
-    std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
-
     // 声明（常量/变量）
     // std::any visitDecl(SysYParser::DeclContext *context) override;
     // std::any visitConstDeclDef(SysYParser::ConstDeclDefContext *context) override;
@@ -32,18 +25,28 @@ public:
     // std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
 
     // // 函数定义
+    std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
     // std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
     // std::any visitFuncFParams(SysYParser::FuncFParamsContext *context) override;
     // std::any visitFuncFParam(SysYParser::FuncFParamContext *context) override;
 
     // // 代码块与语句
-    // std::any visitBlock(SysYParser::BlockContext *context) override;
+    std::any visitBlock(SysYParser::BlockContext *context) override;
     // std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
     // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
-    // std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
+    std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
     // std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
 
     // 表达式（算术/逻辑/左值）
+    std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
+    std::any visitNumberPrimaryExp(SysYParser::NumberPrimaryExpContext *context) override;
+    std::any visitParenExp(SysYParser::ParenExpContext *context) override;
+    std::any visitMulAddExp(SysYParser::MulAddExpContext *context) override;
+    std::any visitBinaryAddExp(SysYParser::BinaryAddExpContext *context) override;
+    std::any visitUnaryMulExp(SysYParser::UnaryMulExpContext *context) override;
+    std::any visitBinaryMulExp(SysYParser::BinaryMulExpContext *context) override;
+    std::any visitPrimaryUnaryExp(SysYParser::PrimaryUnaryExpContext *context) override;
+    std::any visitUnaryOpExp(SysYParser::UnaryOpExpContext *context) override;
     // std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
     // std::any visitLVal(SysYParser::LValContext *context) override;
     // std::any visitCondLOrExp(SysYParser::CondLOrExpContext *context) override;

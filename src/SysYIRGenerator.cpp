@@ -11,6 +11,38 @@ std::any SysYIRGenerator::visitCompUnit(SysYParser::CompUnitContext *ctx)
     return visitChildren(ctx);
 }
 
+// 常量声明：const int a = <constExp>, ...
+std::any SysYIRGenerator::visitConstDeclDef(SysYParser::ConstDeclDefContext *context)
+{
+    currentType = IntType::getInstance();
+    return visitChildren(context);
+}
+
+// 常量定义：IDENT ... ASSIGN constInitVal
+// 使用 ConstantSymbol 存入符号表；在全局作用域也可生成常量定义方便链接
+// 注意：本实现仅支持标量常量
+std::any SysYIRGenerator::visitConstDef(SysYParser::ConstDefContext *context)
+{
+    // 仅支持标量 const 初始化
+    std::string name = context->IDENT()->getText();
+    // 计算常量初值（纯数字字符串）
+    std::any iv = visit(context->constInitVal());
+    std::string initVal = iv.has_value() ? std::any_cast<std::string>(iv) : context->constInitVal()->getText();
+
+    // 记录到符号表
+    uint64_t cid = getNextConstId();
+    std::string irValue = "i32 " + initVal;
+    auto cSym = std::make_shared<ConstantSymbol>(name, currentType, irValue, cid);
+    symTab->insertSymbol(cSym);
+
+    // 若为全局作用域，生成一个全局常量定义方便后续 load（或直接作为符号被引用）
+    if (symTab->isGlobalScope())
+    {
+        irBuilder->createGlobalVar(cSym->getIRName(), currentType->toIRString(), initVal);
+    }
+    return {};
+}
+
 std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
 {
     // 函数名
@@ -204,15 +236,25 @@ std::any SysYIRGenerator::visitUnaryOpExp(SysYParser::UnaryOpExpContext *context
 std::any SysYIRGenerator::visitLValPrimaryExp(SysYParser::LValPrimaryExpContext *context)
 {
     std::string name = context->lVal()->IDENT()->getText();
-    auto sym = findSymbol<VariableSymbol>(name);
-    if (!sym)
+    // 先尝试常量符号
+    if (auto c = findSymbol<ConstantSymbol>(name))
     {
-        return std::any(context->getText());
+        // 常量参与运算：直接返回纯数值（去掉类型前缀）
+        // c->getIRValue() 形如 "i32 10"
+        std::string irv = c->getIRValue();
+        auto pos = irv.find(' ');
+        std::string num = pos != std::string::npos ? irv.substr(pos + 1) : irv;
+        return std::any(num);
     }
-    std::string ptr = sym->getIRName();
-    std::string dst = "%var_" + std::to_string(getNextVarId());
-    irBuilder->createLoad(dst, ptr, "i32");
-    return std::any(dst);
+    // 变量符号：加载
+    if (auto v = findSymbol<VariableSymbol>(name))
+    {
+        std::string ptr = v->getIRName();
+        std::string dst = "%var_" + std::to_string(getNextVarId());
+        irBuilder->createLoad(dst, ptr, "i32");
+        return std::any(dst);
+    }
+    return std::any(context->getText());
 }
 
 // 变量声明列表
@@ -272,6 +314,14 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
 std::any SysYIRGenerator::visitExpInitVal(SysYParser::ExpInitValContext *context)
 {
     std::string v = evaluateExp(context->exp());
+    return std::any(v);
+}
+
+// constInitVal: constExp # ConstExpInitVal
+std::any SysYIRGenerator::visitConstExpInitVal(SysYParser::ConstExpInitValContext *context)
+{
+    // 仅支持标量常量
+    std::string v = context->constExp()->addExp()->getText();
     return std::any(v);
 }
 

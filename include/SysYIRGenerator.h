@@ -17,7 +17,8 @@ public:
 
     // 声明（常量/变量）
     // std::any visitDecl(SysYParser::DeclContext *context) override;
-    // std::any visitConstDeclDef(SysYParser::ConstDeclDefContext *context) override;
+    std::any visitConstDeclDef(SysYParser::ConstDeclDefContext *context) override;
+    std::any visitConstDef(SysYParser::ConstDefContext *context) override;
     // std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
 
     // // 变量定义（有无初始化）
@@ -53,6 +54,7 @@ public:
     std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
     std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
     std::any visitExpInitVal(SysYParser::ExpInitValContext *context) override;
+    std::any visitConstExpInitVal(SysYParser::ConstExpInitValContext *context) override;
     // std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
     // std::any visitLVal(SysYParser::LValContext *context) override;
     // std::any visitCondLOrExp(SysYParser::CondLOrExpContext *context) override;

@@ -45,6 +45,8 @@ public:
     std::string createReturn(const std::string &valueIR = "", const std::string &returnTypeIR = "void");
     // 11. 比较指令（如%var_6 = icmp eq i32 %var_2, i32 0）
     std::string createICmp(const std::string &dstIRName, const std::string &cmpOp, const std::string &lhsIR, const std::string &rhsIR);
+    // 12. 零扩展（如%var_7 = zext i1 %cmp to i32）
+    std::string createZExt(const std::string &dstIRName, const std::string &fromTypeIR, const std::string &valueIR, const std::string &toTypeIR);
 
     // 获取最终生成的LLVM IR完整字符串
     const std::string &getIRString() const { return irBuffer; }

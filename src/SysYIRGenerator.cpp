@@ -13,7 +13,6 @@ std::any SysYIRGenerator::visitCompUnit(SysYParser::CompUnitContext *ctx)
 
 std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
 {
-    // 仅支持 int main() 的最小实现
     // 函数名
     std::string funcName = "@" + context->IDENT()->getText();
     // 返回类型：根据标签 IntFuncType/VoidFuncType
@@ -22,6 +21,9 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
     irBuilder->startFunction(retIRType, funcName);
     irBuilder->startBasicBlock("entry");
 
+    // 进入函数作用域
+    symTab->enterScope();
+
     // 访问函数体 block
     visit(context->block());
 
@@ -29,13 +31,20 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
     irBuilder->endBasicBlock();
     irBuilder->endFunction();
 
+    // 退出函数作用域
+    symTab->exitScope();
+
     return {};
 }
 
 std::any SysYIRGenerator::visitBlock(SysYParser::BlockContext *context)
 {
-    // 逐个处理 blockItem（此任务仅需return语句）
-    return visitChildren(context);
+    // 进入块作用域
+    symTab->enterScope();
+    auto r = visitChildren(context);
+    // 退出块作用域
+    symTab->exitScope();
+    return r;
 }
 
 std::any SysYIRGenerator::visitReturnStmt(SysYParser::ReturnStmtContext *context)
@@ -164,7 +173,7 @@ std::any SysYIRGenerator::visitUnaryOpExp(SysYParser::UnaryOpExpContext *context
         return std::any(context->getText());
     std::string val = std::any_cast<std::string>(v);
 
-    // 处理正负号与逻辑非（本任务仅需算术）
+    // 处理正负号与逻辑非
     auto opCtx = context->unaryOp();
     int tokType = opCtx->getStart()->getType();
     // SysYLexer token types: MINUS ('-'), PLUS ('+'), NOT ('!')
@@ -182,7 +191,93 @@ std::any SysYIRGenerator::visitUnaryOpExp(SysYParser::UnaryOpExpContext *context
     }
     else
     {
-        // 逻辑非暂不实现，直接返回文本（不会用于95_ret）
+        // 逻辑非：!x => (x == 0) ? 1 : 0
+        std::string cmp = "%var_" + std::to_string(getNextVarId());
+        irBuilder->createICmp(cmp, "eq", val, "0"); // i1
+        std::string dst = "%var_" + std::to_string(getNextVarId());
+        irBuilder->createZExt(dst, "i1", cmp, "i32");
+        return std::any(dst);
+    }
+}
+
+// lVal 在表达式位置：需 load 当前变量值
+std::any SysYIRGenerator::visitLValPrimaryExp(SysYParser::LValPrimaryExpContext *context)
+{
+    std::string name = context->lVal()->IDENT()->getText();
+    auto sym = findSymbol<VariableSymbol>(name);
+    if (!sym)
+    {
         return std::any(context->getText());
     }
+    std::string ptr = sym->getIRName();
+    std::string dst = "%var_" + std::to_string(getNextVarId());
+    irBuilder->createLoad(dst, ptr, "i32");
+    return std::any(dst);
+}
+
+// 变量声明列表
+std::any SysYIRGenerator::visitVarDeclDef(SysYParser::VarDeclDefContext *context)
+{
+    // 当前仅支持 int 基本类型局部变量
+    currentType = IntType::getInstance();
+    return visitChildren(context);
+}
+
+// 变量定义（无初始化）：在局部作用域分配栈空间
+std::any SysYIRGenerator::visitVarDefNoInit(SysYParser::VarDefNoInitContext *context)
+{
+    std::string name = context->IDENT()->getText();
+    // 创建变量符号并插入符号表
+    uint64_t id = getNextVarId();
+    auto varSym = std::make_shared<VariableSymbol>(name, currentType, symTab->isGlobalScope(), id);
+    symTab->insertSymbol(varSym);
+    // 局部变量：alloca i32
+    if (!varSym->isGlobalVar())
+    {
+        irBuilder->createAlloca(varSym->getIRName(), currentType->toIRString());
+    }
+    return {};
+}
+
+// 变量定义（有初始化）：alloca 并 store 初始值
+std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext *context)
+{
+    std::string name = context->IDENT()->getText();
+    uint64_t id = getNextVarId();
+    auto varSym = std::make_shared<VariableSymbol>(name, currentType, symTab->isGlobalScope(), id);
+    symTab->insertSymbol(varSym);
+    if (varSym->isGlobalVar())
+    {
+        // 任务范围不要求全局初始化，这里省略
+        return {};
+    }
+    // 局部变量栈分配
+    irBuilder->createAlloca(varSym->getIRName(), currentType->toIRString());
+    // 计算初始化表达式（仅处理标量）
+    std::any iv = visit(context->initVal());
+    std::string initVal = iv.has_value() ? std::any_cast<std::string>(iv) : context->initVal()->getText();
+    // 存储到变量地址
+    irBuilder->createStore(initVal, varSym->getIRName(), currentType->toIRString());
+    return {};
+}
+
+// initVal: exp # ExpInitVal
+std::any SysYIRGenerator::visitExpInitVal(SysYParser::ExpInitValContext *context)
+{
+    std::string v = evaluateExp(context->exp());
+    return std::any(v);
+}
+
+// 赋值语句：lVal = exp;
+std::any SysYIRGenerator::visitAssignStmt(SysYParser::AssignStmtContext *context)
+{
+    std::string name = context->lVal()->IDENT()->getText();
+    auto sym = findSymbol<VariableSymbol>(name);
+    if (!sym)
+    {
+        return {};
+    }
+    std::string val = evaluateExp(context->exp());
+    irBuilder->createStore(val, sym->getIRName(), "i32");
+    return {};
 }

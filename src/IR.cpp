@@ -184,6 +184,15 @@ std::string IRBuilder::createICmp(const std::string &dstIRName, const std::strin
     return dstIRName;
 }
 
+std::string IRBuilder::createZExt(const std::string &dstIRName, const std::string &fromTypeIR, const std::string &valueIR, const std::string &toTypeIR)
+{
+    if (!inBasicBlock)
+        return "";
+    std::string instr = dstIRName + " = zext " + fromTypeIR + " " + valueIR + " to " + toTypeIR + "\n";
+    irBuffer += indent() + instr;
+    return dstIRName;
+}
+
 // 辅助：生成缩进（2个空格，增强可读性）
 std::string IRBuilder::indent() const
 {

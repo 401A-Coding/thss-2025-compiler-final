@@ -35,6 +35,7 @@ public:
     // std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
     // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
     std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
+    std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
     // std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
 
     // 表达式（算术/逻辑/左值）
@@ -47,6 +48,11 @@ public:
     std::any visitBinaryMulExp(SysYParser::BinaryMulExpContext *context) override;
     std::any visitPrimaryUnaryExp(SysYParser::PrimaryUnaryExpContext *context) override;
     std::any visitUnaryOpExp(SysYParser::UnaryOpExpContext *context) override;
+    std::any visitLValPrimaryExp(SysYParser::LValPrimaryExpContext *context) override;
+    std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
+    std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
+    std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
+    std::any visitExpInitVal(SysYParser::ExpInitValContext *context) override;
     // std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
     // std::any visitLVal(SysYParser::LValContext *context) override;
     // std::any visitCondLOrExp(SysYParser::CondLOrExpContext *context) override;

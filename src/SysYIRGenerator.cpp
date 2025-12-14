@@ -107,8 +107,8 @@ std::any SysYIRGenerator::visitReturnStmt(SysYParser::ReturnStmtContext *context
 // 表达式最小支持：数字常量
 std::any SysYIRGenerator::visitNumberPrimaryExp(SysYParser::NumberPrimaryExpContext *context)
 {
-    // 返回纯数字字符串
-    return std::any(context->number()->getText());
+    // 返回规范化后的十进制数字字符串（支持十六进制/八进制）
+    return std::any(normalizeIntLiteral(context->number()->getText()));
 }
 
 std::any SysYIRGenerator::visitExpAddExp(SysYParser::ExpAddExpContext *context)
@@ -395,9 +395,92 @@ std::any SysYIRGenerator::visitExpInitVal(SysYParser::ExpInitValContext *context
 // constInitVal: constExp # ConstExpInitVal
 std::any SysYIRGenerator::visitConstExpInitVal(SysYParser::ConstExpInitValContext *context)
 {
-    // 仅支持标量常量
-    std::string v = context->constExp()->addExp()->getText();
-    return std::any(v);
+    // 仅支持标量常量；通过访问表达式以获得已规范化的数字
+    std::any vAny = visit(context->constExp()->addExp());
+    if (vAny.has_value())
+    {
+        try
+        {
+            return vAny;
+        }
+        catch (const std::bad_any_cast &)
+        {
+        }
+    }
+    return std::any(normalizeIntLiteral(context->constExp()->addExp()->getText()));
+}
+
+// 将整数文本规范化为十进制：支持0x(十六进制)、0(八进制)与十进制
+std::string SysYIRGenerator::normalizeIntLiteral(const std::string &text)
+{
+    std::string s = text;
+    // 去除可能的正号
+    bool negative = false;
+    if (!s.empty() && (s[0] == '+' || s[0] == '-'))
+    {
+        negative = s[0] == '-';
+        s = s.substr(1);
+    }
+
+    auto toLower = [](std::string x)
+    {
+        for (char &c : x)
+            c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        return x;
+    };
+    std::string lower = toLower(s);
+
+    long long value = 0;
+    if (lower.size() > 2 && lower[0] == '0' && lower[1] == 'x')
+    {
+        // 十六进制
+        std::string hex = lower.substr(2);
+        value = 0;
+        for (char c : hex)
+        {
+            int v = 0;
+            if (c >= '0' && c <= '9')
+                v = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                v = 10 + (c - 'a');
+            else if (c == '_')
+                continue; // 允许下划线分隔符（若出现）
+            else
+                break; // 非法字符，保持当前解析
+            value = (value << 4) + v;
+        }
+    }
+    else if (lower.size() > 1 && lower[0] == '0')
+    {
+        // 八进制（前导0且非0本身）
+        value = 0;
+        for (size_t i = 1; i < lower.size(); ++i)
+        {
+            char c = lower[i];
+            if (c == '_')
+                continue;
+            if (c < '0' || c > '7')
+                break; // 非法八进制字符，停止解析
+            value = (value * 8) + (c - '0');
+        }
+    }
+    else
+    {
+        // 十进制
+        try
+        {
+            value = std::stoll(lower);
+        }
+        catch (...)
+        {
+            // 兜底：返回原文本
+            return negative ? std::string("-") + s : s;
+        }
+    }
+
+    if (negative)
+        value = -value;
+    return std::to_string(value);
 }
 
 // 赋值语句：lVal = exp;

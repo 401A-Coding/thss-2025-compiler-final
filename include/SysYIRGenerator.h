@@ -61,6 +61,8 @@ private:
     std::string evaluateConstExp(SysYParser::ConstExpContext *context);
     // 计算一般表达式的值（当前仅支持整数常量），返回纯数值字符串
     std::string evaluateExp(SysYParser::ExpContext *context);
+    // 规范化整数文本：支持十六进制(0x..)与八进制(0..)，返回十进制字符串
+    std::string normalizeIntLiteral(const std::string &text);
     // 查找符号并转换为对应类型
     template <typename T>
     std::shared_ptr<T> findSymbol(const std::string &name) const

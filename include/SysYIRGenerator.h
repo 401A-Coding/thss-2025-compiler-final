@@ -1,5 +1,5 @@
 #pragma once
-#include "SysYParserVisitor.h"
+#include "SysYParserBaseVisitor.h"
 #include "Type.h"
 #include "Symbol.h"
 #include "SymbolTable.h"
@@ -7,40 +7,44 @@
 #include <stack>
 #include <unordered_map>
 
-class SysYIRGenerator : public SysYParserVisitor
+class SysYIRGenerator : public SysYParserBaseVisitor
 {
 public:
     explicit SysYIRGenerator(std::shared_ptr<SymbolTable> symTab, std::shared_ptr<IRBuilder> irBuilder);
 
     // 编译单元入口
-    std::any visitCompUnit(SysYParser::CompUnitContext *context) override;
+    std::any visitCompUnit(SysYParser::CompUnitContext *ctx) override;
+
+    // 最小实现：函数定义、块、return语句、数字表达式
+    std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
+    std::any visitBlock(SysYParser::BlockContext *context) override;
+    std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
+    std::any visitNumberPrimaryExp(SysYParser::NumberPrimaryExpContext *context) override;
+    std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
 
     // 声明（常量/变量）
-    std::any visitDecl(SysYParser::DeclContext *context) override;
-    std::any visitConstDeclDef(SysYParser::ConstDeclDefContext *context) override;
-    std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
+    // std::any visitDecl(SysYParser::DeclContext *context) override;
+    // std::any visitConstDeclDef(SysYParser::ConstDeclDefContext *context) override;
+    // std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
 
-    // 变量定义（有无初始化）
-    std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
-    std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
+    // // 变量定义（有无初始化）
+    // std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
+    // std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
 
-    // 函数定义
-    std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
-    std::any visitFuncFParams(SysYParser::FuncFParamsContext *context) override;
-    std::any visitFuncFParam(SysYParser::FuncFParamContext *context) override;
+    // // 函数定义
+    // std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
+    // std::any visitFuncFParams(SysYParser::FuncFParamsContext *context) override;
+    // std::any visitFuncFParam(SysYParser::FuncFParamContext *context) override;
 
-    // 代码块与语句
-    std::any visitBlock(SysYParser::BlockContext *context) override;
-    std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
-    std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
-    std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
-    std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
+    // // 代码块与语句
+    // std::any visitBlock(SysYParser::BlockContext *context) override;
+    // std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
+    // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
+    // std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
+    // std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
 
     // 表达式（算术/逻辑/左值）
     // std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
-    // std::any visitAddExp(SysYParser::AddExpContext *context) override;
-    // std::any visitMulExp(SysYParser::MulExpContext *context) override;
-    // std::any visitUnaryExp(SysYParser::UnaryExpContext *context) override;
     // std::any visitLVal(SysYParser::LValContext *context) override;
     // std::any visitCondLOrExp(SysYParser::CondLOrExpContext *context) override;
 
@@ -51,6 +55,8 @@ private:
     uint64_t getNextConstId() { return ++constIdCounter; }
     // 辅助：计算常量表达式的值，返回IR字符串（如"i32 10"）
     std::string evaluateConstExp(SysYParser::ConstExpContext *context);
+    // 辅助：计算一般表达式的值（当前仅支持整数常量），返回纯数值字符串
+    std::string evaluateExp(SysYParser::ExpContext *context);
     // 辅助：查找符号并转换为对应类型
     template <typename T>
     std::shared_ptr<T> findSymbol(const std::string &name) const

@@ -6,11 +6,11 @@
 // 类型ID：
 enum class TypeID
 {
-    INT,      // 任务1：int（32位有符号）
-    VOID,     // 任务1：void
-    ARRAY,    // 任务1：数组（int[]）
-    FUNCTION, // 任务1：函数（int(int)）
-    POINTER,  // 任务1：指针（int*）
+    INT,      // int（32位有符号）
+    VOID,     // void
+    ARRAY,    // 数组（int[]）
+    FUNCTION, // 函数（int(int)）
+    POINTER,  // 指针（int*）
 };
 
 // 抽象类型基类（所有类型继承此类，支持多态扩展）
@@ -45,7 +45,7 @@ public:
     std::string toIRString() const override { return "i32"; }
     bool isNumericType() const override { return true; }
 
-private:
+public:
     IntType() : Type(TypeID::INT) {}
 };
 
@@ -60,7 +60,7 @@ public:
     }
     std::string toIRString() const override { return "void"; }
 
-private:
+public:
     VoidType() : Type(TypeID::VOID) {}
 };
 

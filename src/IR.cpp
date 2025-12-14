@@ -44,9 +44,7 @@ void IRBuilder::endFunction()
 
 void IRBuilder::endModule()
 {
-    // 拼接模块尾部（可选：添加syslib函数声明，如declare i32 @printf(i8*, ...)）
-    irBuffer += "declare i32 @printf(i8*, ...)\n";
-    irBuffer += "declare void @scanf(i8*, ...)\n";
+    // 拼接模块尾部
 }
 
 // 全局变量声明：如@var_0 = constant i32 10, align 4
@@ -117,7 +115,74 @@ std::string IRBuilder::createReturn(const std::string &valueIR, const std::strin
     return "";
 }
 
-// 其他指令（createGEP、createCall、createCondBr等）按同样逻辑实现，仅拼接字符串
+std::string IRBuilder::createGEP(const std::string &dstIRName, const std::string &basePtrIR, const std::vector<std::string> &indicesIR)
+{
+    if (!inBasicBlock)
+        return "";
+    std::string indices;
+    for (size_t i = 0; i < indicesIR.size(); ++i)
+    {
+        if (i)
+            indices += ", ";
+        indices += indicesIR[i];
+    }
+    std::string instr = dstIRName + " = getelementptr inbounds " + basePtrIR + ", " + indices + "\n";
+    irBuffer += indent() + instr;
+    return dstIRName;
+}
+
+std::string IRBuilder::createCall(const std::string &dstIRName, const std::string &funcIRName, const std::string &funcTypeIR, const std::vector<std::string> &argsIR)
+{
+    if (!inBasicBlock)
+        return "";
+    std::string args;
+    for (size_t i = 0; i < argsIR.size(); ++i)
+    {
+        if (i)
+            args += ", ";
+        args += argsIR[i];
+    }
+    std::string instr;
+    if (funcTypeIR == "void")
+    {
+        instr = "call void " + funcIRName + "(" + args + ")\n";
+        irBuffer += indent() + instr;
+        return "";
+    }
+    else
+    {
+        instr = dstIRName + " = call " + funcTypeIR + " " + funcIRName + "(" + args + ")\n";
+        irBuffer += indent() + instr;
+        return dstIRName;
+    }
+}
+
+std::string IRBuilder::createBr(const std::string &targetBBName)
+{
+    if (!inBasicBlock)
+        return "";
+    std::string instr = "br label %" + targetBBName + "\n";
+    irBuffer += indent() + instr;
+    return "";
+}
+
+std::string IRBuilder::createCondBr(const std::string &condIR, const std::string &trueBBName, const std::string &falseBBName)
+{
+    if (!inBasicBlock)
+        return "";
+    std::string instr = "br i1 " + condIR + ", label %" + trueBBName + ", label %" + falseBBName + "\n";
+    irBuffer += indent() + instr;
+    return "";
+}
+
+std::string IRBuilder::createICmp(const std::string &dstIRName, const std::string &cmpOp, const std::string &lhsIR, const std::string &rhsIR)
+{
+    if (!inBasicBlock)
+        return "";
+    std::string instr = dstIRName + " = icmp " + cmpOp + " i32 " + lhsIR + ", " + rhsIR + "\n";
+    irBuffer += indent() + instr;
+    return dstIRName;
+}
 
 // 辅助：生成缩进（2个空格，增强可读性）
 std::string IRBuilder::indent() const

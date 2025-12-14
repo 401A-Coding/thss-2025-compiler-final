@@ -10,5 +10,5 @@ docker/
 test/resources/functional/*.output
 
 compiler
-test.ll
+*.ll
 test.sy

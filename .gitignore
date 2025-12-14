@@ -8,3 +8,7 @@ build/
 dist/
 docker/
 test/resources/functional/*.output
+
+compiler
+test.ll
+test.sy

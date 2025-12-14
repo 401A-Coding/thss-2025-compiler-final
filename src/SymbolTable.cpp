@@ -4,6 +4,7 @@
 SymbolTable::SymbolTable()
 {
     enterScope(); // 初始化全局作用域（栈底）
+    loadSysLibSymbols();
 }
 
 void SymbolTable::enterScope()

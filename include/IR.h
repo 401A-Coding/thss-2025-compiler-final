@@ -47,6 +47,8 @@ public:
     std::string createICmp(const std::string &dstIRName, const std::string &cmpOp, const std::string &lhsIR, const std::string &rhsIR);
     // 12. 零扩展（如%var_7 = zext i1 %cmp to i32）
     std::string createZExt(const std::string &dstIRName, const std::string &fromTypeIR, const std::string &valueIR, const std::string &toTypeIR);
+    // 13. 声明外部函数（如declare i32 @getint()）
+    void declareFunction(const std::string &retTypeIR, const std::string &funcIRName, const std::vector<std::string> &paramTypeIRs);
 
     // 获取最终生成的LLVM IR完整字符串
     const std::string &getIRString() const { return irBuffer; }

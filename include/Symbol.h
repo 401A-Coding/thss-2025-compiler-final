@@ -58,10 +58,10 @@ class FunctionSymbol : public Symbol
 public:
     FunctionSymbol(std::string name, std::shared_ptr<FunctionType> funcType, bool isSysLib = false)
         : Symbol(
-              std::move(name),
+              name,
               SymbolKind::FUNCTION,
               std::move(funcType),
-              "@" + name // 函数IR名称固定为@函数名
+              std::string("@") + name // 函数IR名称固定为@函数名
               ),
           isSysLib(isSysLib)
     {

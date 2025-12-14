@@ -193,6 +193,18 @@ std::string IRBuilder::createZExt(const std::string &dstIRName, const std::strin
     return dstIRName;
 }
 
+void IRBuilder::declareFunction(const std::string &retTypeIR, const std::string &funcIRName, const std::vector<std::string> &paramTypeIRs)
+{
+    std::string args;
+    for (size_t i = 0; i < paramTypeIRs.size(); ++i)
+    {
+        if (i)
+            args += ", ";
+        args += paramTypeIRs[i];
+    }
+    irBuffer += "declare " + retTypeIR + " " + funcIRName + "(" + args + ")\n";
+}
+
 // 辅助：生成缩进（2个空格，增强可读性）
 std::string IRBuilder::indent() const
 {

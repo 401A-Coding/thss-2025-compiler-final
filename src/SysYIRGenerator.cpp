@@ -6,9 +6,19 @@ SysYIRGenerator::SysYIRGenerator(std::shared_ptr<SymbolTable> symTab, std::share
 {
 }
 
-std::any SysYIRGenerator::visitCompUnit(SysYParser::CompUnitContext *ctx)
+std::any SysYIRGenerator::visitCompUnit(SysYParser::CompUnitContext *context)
 {
-    return visitChildren(ctx);
+    // 声明sylib函数原型，便于后续调用链接
+    // int getint(); int getch(); int getarray(int*);
+    // void putint(int); void putch(int); void putarray(int, int*);
+    irBuilder->declareFunction("i32", "@getint", {});
+    irBuilder->declareFunction("i32", "@getch", {});
+    irBuilder->declareFunction("i32", "@getarray", {"i32*"});
+    irBuilder->declareFunction("void", "@putint", {"i32"});
+    irBuilder->declareFunction("void", "@putch", {"i32"});
+    irBuilder->declareFunction("void", "@putarray", {"i32", "i32*"});
+
+    return visitChildren(context);
 }
 
 // 常量声明：const int a = <constExp>, ...
@@ -228,6 +238,71 @@ std::any SysYIRGenerator::visitUnaryOpExp(SysYParser::UnaryOpExpContext *context
         irBuilder->createICmp(cmp, "eq", val, "0"); // i1
         std::string dst = "%var_" + std::to_string(getNextVarId());
         irBuilder->createZExt(dst, "i1", cmp, "i32");
+        return std::any(dst);
+    }
+}
+
+// unaryExp -> IDENT '(' funcRParams? ')'  : 函数调用
+std::any SysYIRGenerator::visitFuncCallUnaryExp(SysYParser::FuncCallUnaryExpContext *context)
+{
+    std::string name = context->IDENT()->getText();
+    auto fSym = findSymbol<FunctionSymbol>(name);
+    if (!fSym)
+    {
+        // 未识别函数：返回原文本
+        return std::any(context->getText());
+    }
+
+    auto fType = fSym->getFuncType();
+    std::string retTy = fType->getReturnType()->toIRString();
+
+    // 构造参数IR（带类型前缀）
+    std::vector<std::string> argsIR;
+    auto &paramTypes = fType->getParamTypes();
+    if (context->funcRParams())
+    {
+        auto paramsCtx = context->funcRParams();
+        size_t n = paramTypes.size();
+        for (size_t i = 0; i < n; ++i)
+        {
+            std::shared_ptr<Type> pty = paramTypes[i];
+            // 获取对应的实参表达式（严格按位置）
+            SysYParser::ExpContext *argExp = paramsCtx->exp(i);
+            if (!argExp)
+                break;
+            if (pty->isPointerType())
+            {
+                // 指针参数：尝试将标识符作为地址传递（简化处理）
+                std::string text = argExp->getText();
+                if (auto v = findSymbol<VariableSymbol>(text))
+                {
+                    argsIR.push_back(pty->toIRString() + " " + v->getIRName());
+                }
+                else
+                {
+                    // 兜底：传0指针
+                    argsIR.push_back(pty->toIRString() + " null");
+                }
+            }
+            else
+            {
+                // 数值参数：计算为纯数字或SSA名，并添加类型前缀
+                std::string val = evaluateExp(argExp);
+                argsIR.push_back(pty->toIRString() + " " + val);
+            }
+        }
+    }
+
+    // 发出调用
+    if (retTy == "void")
+    {
+        irBuilder->createCall("", fSym->getIRName(), retTy, argsIR);
+        return std::any(std::string());
+    }
+    else
+    {
+        std::string dst = "%var_" + std::to_string(getNextVarId());
+        irBuilder->createCall(dst, fSym->getIRName(), retTy, argsIR);
         return std::any(dst);
     }
 }

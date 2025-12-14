@@ -13,25 +13,24 @@ public:
     explicit SysYIRGenerator(std::shared_ptr<SymbolTable> symTab, std::shared_ptr<IRBuilder> irBuilder);
 
     // 编译单元入口
-    std::any visitCompUnit(SysYParser::CompUnitContext *ctx) override;
+    std::any visitCompUnit(SysYParser::CompUnitContext *context) override;
 
     // 声明（常量/变量）
-    // std::any visitDecl(SysYParser::DeclContext *context) override;
     std::any visitConstDeclDef(SysYParser::ConstDeclDefContext *context) override;
     std::any visitConstDef(SysYParser::ConstDefContext *context) override;
-    // std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
+    std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
 
-    // // 变量定义（有无初始化）
-    // std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
-    // std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
+    // 变量定义（有无初始化）
+    std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
+    std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
 
-    // // 函数定义
+    // 函数定义与调用
     std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
-    // std::any visitFuncDef(SysYParser::FuncDefContext *context) override;
+    std::any visitFuncCallUnaryExp(SysYParser::FuncCallUnaryExpContext *context) override;
     // std::any visitFuncFParams(SysYParser::FuncFParamsContext *context) override;
     // std::any visitFuncFParam(SysYParser::FuncFParamContext *context) override;
 
-    // // 代码块与语句
+    // 代码块与语句
     std::any visitBlock(SysYParser::BlockContext *context) override;
     // std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
     // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
@@ -50,25 +49,19 @@ public:
     std::any visitPrimaryUnaryExp(SysYParser::PrimaryUnaryExpContext *context) override;
     std::any visitUnaryOpExp(SysYParser::UnaryOpExpContext *context) override;
     std::any visitLValPrimaryExp(SysYParser::LValPrimaryExpContext *context) override;
-    std::any visitVarDeclDef(SysYParser::VarDeclDefContext *context) override;
-    std::any visitVarDefNoInit(SysYParser::VarDefNoInitContext *context) override;
-    std::any visitVarDefWithInit(SysYParser::VarDefWithInitContext *context) override;
     std::any visitExpInitVal(SysYParser::ExpInitValContext *context) override;
     std::any visitConstExpInitVal(SysYParser::ConstExpInitValContext *context) override;
-    // std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
-    // std::any visitLVal(SysYParser::LValContext *context) override;
-    // std::any visitCondLOrExp(SysYParser::CondLOrExpContext *context) override;
 
 private:
-    // 辅助：生成唯一变量ID（避免IR名称冲突）
+    // 生成唯一变量ID（避免IR名称冲突）
     uint64_t getNextVarId() { return ++varIdCounter; }
-    // 辅助：生成唯一常量ID
+    // 生成唯一常量ID
     uint64_t getNextConstId() { return ++constIdCounter; }
-    // 辅助：计算常量表达式的值，返回IR字符串（如"i32 10"）
+    // 计算常量表达式的值，返回IR字符串（如"i32 10"）
     std::string evaluateConstExp(SysYParser::ConstExpContext *context);
-    // 辅助：计算一般表达式的值（当前仅支持整数常量），返回纯数值字符串
+    // 计算一般表达式的值（当前仅支持整数常量），返回纯数值字符串
     std::string evaluateExp(SysYParser::ExpContext *context);
-    // 辅助：查找符号并转换为对应类型
+    // 查找符号并转换为对应类型
     template <typename T>
     std::shared_ptr<T> findSymbol(const std::string &name) const
     {

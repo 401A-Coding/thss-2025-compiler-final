@@ -236,6 +236,11 @@ std::any SysYIRGenerator::visitVarDefNoInit(SysYParser::VarDefNoInitContext *con
     {
         irBuilder->createAlloca(varSym->getIRName(), currentType->toIRString());
     }
+    else
+    {
+        // 全局未初始化，默认为0
+        irBuilder->createGlobalVar(varSym->getIRName(), currentType->toIRString(), "0");
+    }
     return {};
 }
 
@@ -246,18 +251,20 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
     uint64_t id = getNextVarId();
     auto varSym = std::make_shared<VariableSymbol>(name, currentType, symTab->isGlobalScope(), id);
     symTab->insertSymbol(varSym);
-    if (varSym->isGlobalVar())
-    {
-        // 任务范围不要求全局初始化，这里省略
-        return {};
-    }
-    // 局部变量栈分配
-    irBuilder->createAlloca(varSym->getIRName(), currentType->toIRString());
     // 计算初始化表达式（仅处理标量）
     std::any iv = visit(context->initVal());
     std::string initVal = iv.has_value() ? std::any_cast<std::string>(iv) : context->initVal()->getText();
-    // 存储到变量地址
-    irBuilder->createStore(initVal, varSym->getIRName(), currentType->toIRString());
+    if (varSym->isGlobalVar())
+    {
+        // 生成全局变量定义
+        irBuilder->createGlobalVar(varSym->getIRName(), currentType->toIRString(), initVal);
+    }
+    else
+    {
+        // 局部变量栈分配并初始化
+        irBuilder->createAlloca(varSym->getIRName(), currentType->toIRString());
+        irBuilder->createStore(initVal, varSym->getIRName(), currentType->toIRString());
+    }
     return {};
 }
 

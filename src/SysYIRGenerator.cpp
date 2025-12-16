@@ -496,3 +496,28 @@ std::any SysYIRGenerator::visitAssignStmt(SysYParser::AssignStmtContext *context
     irBuilder->createStore(val, sym->getIRName(), "i32");
     return {};
 }
+
+// 记录变量在某路径的赋值
+void SysYIRGenerator::recordPhiVar(const std::string &varName, const std::string &valIR, const std::string &bbName)
+{
+    if (phiVarStack.empty())
+        return;
+    phiVarStack.top()[varName].emplace_back(valIR, bbName);
+}
+
+// 为变量生成phi指令
+std::string SysYIRGenerator::generatePhiForVar(const std::string &varName, const std::string &mergeBB)
+{
+    if (phiVarStack.empty() || phiVarStack.top().count(varName) == 0)
+    {
+        return ""; // 无多路径赋值，无需phi
+    }
+    auto &valsAndLabels = phiVarStack.top()[varName];
+    // 生成唯一的phi目标变量名
+    std::string phiVar = "%var_" + std::to_string(getNextVarId());
+    // 调用IRBuilder生成phi指令（mergeBB中）
+    irBuilder->createPhi(phiVar, "i32", valsAndLabels);
+    // 清空该变量的phi记录
+    phiVarStack.top().erase(varName);
+    return phiVar;
+}

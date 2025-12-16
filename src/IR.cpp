@@ -2,7 +2,9 @@
 #include <iostream>
 
 IRBuilder::IRBuilder(const std::string &moduleName)
-    : moduleName(moduleName), inFunction(false), inBasicBlock(false) {}
+    : moduleName(moduleName), inFunction(false), inBasicBlock(false)
+{
+}
 
 void IRBuilder::startModule()
 {
@@ -14,6 +16,8 @@ void IRBuilder::startModule()
 void IRBuilder::startFunction(const std::string &funcIRType, const std::string &funcIRName)
 {
     inFunction = true;
+    inBasicBlock = false;
+    bbTerminated = false;
     // 拼接函数定义开头（如define i32 @main() {）
     irBuffer += "define " + funcIRType + " " + funcIRName + "() {\n";
 }
@@ -22,14 +26,29 @@ void IRBuilder::startBasicBlock(const std::string &bbName)
 {
     if (!inFunction)
         return;
+    // 若上一个基本块仍未终结，则自动补一条跳转到新块
+    if (inBasicBlock && !bbTerminated)
+    {
+        std::string instr = "br label %" + bbName + "\n";
+        irBuffer += indent() + instr;
+        bbTerminated = true;
+    }
     inBasicBlock = true;
-    currentBBs.push_back(bbName);
+    bbTerminated = false;
     // 拼接基本块标签（如entry:）
     irBuffer += indent() + bbName + ":\n";
 }
 
 void IRBuilder::endBasicBlock()
 {
+    if (!inFunction || !inBasicBlock)
+        return;
+    // 若块还未以终结指令结束，补上unreachable保证IR合法
+    if (!bbTerminated)
+    {
+        irBuffer += indent() + std::string("unreachable\n");
+        bbTerminated = true;
+    }
     inBasicBlock = false;
 }
 
@@ -39,7 +58,6 @@ void IRBuilder::endFunction()
         return;
     irBuffer += "}\n\n";
     inFunction = false;
-    currentBBs.clear();
 }
 
 void IRBuilder::endModule()
@@ -58,7 +76,7 @@ std::string IRBuilder::createGlobalVar(const std::string &varIRName, const std::
 // 局部变量分配：如%var_1 = alloca i32, align 4
 std::string IRBuilder::createAlloca(const std::string &varIRName, const std::string &typeIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = varIRName + " = alloca " + typeIR + ", align 4\n";
     irBuffer += indent() + instr;
@@ -68,7 +86,7 @@ std::string IRBuilder::createAlloca(const std::string &varIRName, const std::str
 // 存储指令：如store i32 1, i32* %var_1, align 4
 std::string IRBuilder::createStore(const std::string &valueIR, const std::string &ptrIRName, const std::string &typeIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = "store " + typeIR + " " + valueIR + ", " + typeIR + "* " + ptrIRName + ", align 4\n";
     irBuffer += indent() + instr;
@@ -78,7 +96,7 @@ std::string IRBuilder::createStore(const std::string &valueIR, const std::string
 // 加载指令：如%var_2 = load i32, i32* %var_1, align 4
 std::string IRBuilder::createLoad(const std::string &dstIRName, const std::string &ptrIRName, const std::string &typeIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = dstIRName + " = load " + typeIR + ", " + typeIR + "* " + ptrIRName + ", align 4\n";
     irBuffer += indent() + instr;
@@ -88,7 +106,7 @@ std::string IRBuilder::createLoad(const std::string &dstIRName, const std::strin
 // 二元算术指令：如%var_3 = add nsw i32 %var_2, i32 5
 std::string IRBuilder::createBinaryOp(const std::string &dstIRName, const std::string &op, const std::string &lhsIR, const std::string &rhsIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     // op映射：+→add, -→sub, *→mul, /→sdiv, %→srem（有符号）
     std::string llvmOp = op == "+" ? "add nsw" : op == "-" ? "sub nsw"
@@ -103,7 +121,7 @@ std::string IRBuilder::createBinaryOp(const std::string &dstIRName, const std::s
 // 返回指令：如ret i32 %var_5 或 ret void
 std::string IRBuilder::createReturn(const std::string &valueIR, const std::string &returnTypeIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = "ret " + returnTypeIR;
     if (!valueIR.empty())
@@ -112,12 +130,13 @@ std::string IRBuilder::createReturn(const std::string &valueIR, const std::strin
     }
     instr += "\n";
     irBuffer += indent() + instr;
+    bbTerminated = true;
     return "";
 }
 
 std::string IRBuilder::createGEP(const std::string &dstIRName, const std::string &basePtrIR, const std::vector<std::string> &indicesIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string indices;
     for (size_t i = 0; i < indicesIR.size(); ++i)
@@ -133,7 +152,7 @@ std::string IRBuilder::createGEP(const std::string &dstIRName, const std::string
 
 std::string IRBuilder::createCall(const std::string &dstIRName, const std::string &funcIRName, const std::string &funcTypeIR, const std::vector<std::string> &argsIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string args;
     for (size_t i = 0; i < argsIR.size(); ++i)
@@ -159,25 +178,27 @@ std::string IRBuilder::createCall(const std::string &dstIRName, const std::strin
 
 std::string IRBuilder::createBr(const std::string &targetBBName)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = "br label %" + targetBBName + "\n";
     irBuffer += indent() + instr;
+    bbTerminated = true;
     return "";
 }
 
 std::string IRBuilder::createCondBr(const std::string &condIR, const std::string &trueBBName, const std::string &falseBBName)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = "br i1 " + condIR + ", label %" + trueBBName + ", label %" + falseBBName + "\n";
     irBuffer += indent() + instr;
+    bbTerminated = true;
     return "";
 }
 
 std::string IRBuilder::createICmp(const std::string &dstIRName, const std::string &cmpOp, const std::string &lhsIR, const std::string &rhsIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = dstIRName + " = icmp " + cmpOp + " i32 " + lhsIR + ", " + rhsIR + "\n";
     irBuffer += indent() + instr;
@@ -186,9 +207,25 @@ std::string IRBuilder::createICmp(const std::string &dstIRName, const std::strin
 
 std::string IRBuilder::createZExt(const std::string &dstIRName, const std::string &fromTypeIR, const std::string &valueIR, const std::string &toTypeIR)
 {
-    if (!inBasicBlock)
+    if (!inBasicBlock || bbTerminated)
         return "";
     std::string instr = dstIRName + " = zext " + fromTypeIR + " " + valueIR + " to " + toTypeIR + "\n";
+    irBuffer += indent() + instr;
+    return dstIRName;
+}
+
+std::string IRBuilder::createPhi(const std::string &dstIRName, const std::string &typeIR, const std::vector<std::pair<std::string, std::string>> &valsAndLabels)
+{
+    if (!inBasicBlock || bbTerminated)
+        return "";
+    std::string instr = dstIRName + " = phi " + typeIR + " ";
+    for (size_t i = 0; i < valsAndLabels.size(); ++i)
+    {
+        if (i > 0)
+            instr += ", ";
+        instr += "[ " + valsAndLabels[i].first + ", %" + valsAndLabels[i].second + " ]";
+    }
+    instr += "\n";
     irBuffer += indent() + instr;
     return dstIRName;
 }

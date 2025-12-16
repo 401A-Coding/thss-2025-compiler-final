@@ -34,9 +34,10 @@ public:
     std::any visitBlock(SysYParser::BlockContext *context) override;
     // std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
     // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
+    // std::any visitBreakStmt(SysYParser::BreakStmtContext *context) override;
+    // std::any visitContinueStmt(SysYParser::ContinueStmtContext *context) override;
     std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;
     std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
-    // std::any visitAssignStmt(SysYParser::AssignStmtContext *context) override;
 
     // 表达式（算术/逻辑/左值）
     std::any visitExpAddExp(SysYParser::ExpAddExpContext *context) override;
@@ -57,6 +58,11 @@ private:
     uint64_t getNextVarId() { return ++varIdCounter; }
     // 生成唯一常量ID
     uint64_t getNextConstId() { return ++constIdCounter; }
+    // 生成唯一基本块名称（如"if_1"、"while_2"）
+    std::string getNextBBName(const std::string &prefix)
+    {
+        return prefix + "_" + std::to_string(++bbCounter);
+    }
     // 计算常量表达式的值，返回IR字符串（如"i32 10"）
     std::string evaluateConstExp(SysYParser::ConstExpContext *context);
     // 计算一般表达式的值（当前仅支持整数常量），返回纯数值字符串
@@ -77,7 +83,18 @@ private:
     std::shared_ptr<FunctionSymbol> currentFuncSym; // 当前处理的函数
     uint64_t varIdCounter = 0;                      // 变量ID计数器（确保IR名称唯一）
     uint64_t constIdCounter = 0;                    // 常量ID计数器
+    uint64_t bbCounter = 0;                         // 基本块ID计数器
     // 控制流辅助：break/continue的目标基本块名称
     std::stack<std::string> breakBBs;
     std::stack<std::string> continueBBs;
+
+    // 追踪需要phi合并的变量：key=变量名，value=各路径的（值IR, 基本块名）
+    using PhiVarMap = std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>;
+    // 嵌套控制流的phi变量映射栈（支持嵌套if/while）
+    std::stack<PhiVarMap> phiVarStack;
+
+    // 辅助方法：记录变量在当前路径的赋值
+    void recordPhiVar(const std::string &varName, const std::string &valIR, const std::string &bbName);
+    // 辅助方法：生成phi指令并替换变量引用
+    std::string generatePhiForVar(const std::string &varName, const std::string &mergeBB);
 };

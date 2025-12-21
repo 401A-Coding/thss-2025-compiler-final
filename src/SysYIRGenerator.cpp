@@ -80,9 +80,110 @@ std::any SysYIRGenerator::visitConstDef(SysYParser::ConstDefContext *context)
 
         if (varSym->isGlobalVar())
         {
-            // 简化：全局常量数组使用 zeroinitializer（不展开嵌套字面量）
-            irBuilder->createGlobalConst("@const_" + std::to_string(getNextConstId()), arrTy->toIRString(), "zeroinitializer");
-            // 备注：可进一步拼接常量数组字面量；本次需求侧重函数内初始化与使用
+            // 全局常量数组：展开初始化并生成嵌套 initializer 字面量
+            std::vector<std::string> flat;
+            auto product = [](const std::vector<uint64_t> &ds) -> uint64_t
+            { return std::accumulate(ds.begin(), ds.end(), (uint64_t)1, [](uint64_t a, uint64_t b)
+                                     { return a * b; }); };
+            uint64_t total = product(dims);
+
+            std::function<void(SysYParser::ConstInitValContext *, size_t)> flattenConstG = [&](SysYParser::ConstInitValContext *civ, size_t level)
+            {
+                if (!civ)
+                    return;
+                if (auto expIv = dynamic_cast<SysYParser::ConstExpInitValContext *>(civ))
+                {
+                    std::string irConst = evaluateConstExp(expIv->constExp());
+                    auto pos = irConst.find(' ');
+                    std::string num = pos != std::string::npos ? irConst.substr(pos + 1) : irConst;
+                    flat.push_back(num);
+                    return;
+                }
+                if (auto arrIv = dynamic_cast<SysYParser::ConstArrayInitValContext *>(civ))
+                {
+                    auto subCapFrom = [&](size_t lv)
+                    {
+                        uint64_t cap = 1;
+                        for (size_t i = lv; i < dims.size(); ++i)
+                            cap *= dims[i];
+                        return cap;
+                    };
+                    size_t idx = 0;
+                    for (;; ++idx)
+                    {
+                        auto child = arrIv->constInitVal(idx);
+                        if (!child)
+                            break;
+                        if (dynamic_cast<SysYParser::ConstArrayInitValContext *>(child) != nullptr)
+                        {
+                            size_t before = flat.size();
+                            flattenConstG(child, level + 1);
+                            size_t after = flat.size();
+                            uint64_t expected = subCapFrom(level + 1);
+                            uint64_t produced = (after >= before) ? (after - before) : 0;
+                            while (produced < expected)
+                            {
+                                flat.push_back("0");
+                                ++produced;
+                            }
+                        }
+                        else
+                        {
+                            flattenConstG(child, level);
+                        }
+                    }
+                }
+            };
+
+            flattenConstG(context->constInitVal(), 0);
+            while (flat.size() < total)
+                flat.push_back("0");
+            if (flat.size() > total)
+                flat.resize(total);
+
+            // 计算步长（行主序）
+            std::vector<uint64_t> stride(dims.size(), 1);
+            for (int i = (int)dims.size() - 2; i >= 0; --i)
+                stride[i] = stride[i + 1] * dims[i + 1];
+
+            // 生成嵌套 initializer（与数组类型匹配）
+            auto innerTypeFrom = [&](size_t level) -> std::string
+            {
+                if (level >= dims.size() - 1)
+                    return std::string("i32");
+                std::vector<uint64_t> sub(dims.begin() + level + 1, dims.end());
+                return ArrayType::fromDims(currentType, sub)->toIRString();
+            };
+
+            std::function<std::string(size_t, uint64_t)> buildInit = [&](size_t level, uint64_t offset) -> std::string
+            {
+                if (level == dims.size() - 1)
+                {
+                    std::string s = "[ ";
+                    for (uint64_t i = 0; i < dims[level]; ++i)
+                    {
+                        if (i)
+                            s += ", ";
+                        s += std::string("i32 ") + flat[offset + i];
+                    }
+                    s += " ]";
+                    return s;
+                }
+                std::string innerTy = innerTypeFrom(level);
+                std::string s = "[ ";
+                for (uint64_t i = 0; i < dims[level]; ++i)
+                {
+                    if (i)
+                        s += ", ";
+                    uint64_t childOff = offset + i * stride[level];
+                    s += innerTy + " " + buildInit(level + 1, childOff);
+                }
+                s += " ]";
+                return s;
+            };
+
+            std::string initIR = buildInit(0, 0);
+            irBuilder->createGlobalConst(varSym->getIRName(), arrTy->toIRString(), initIR);
         }
         else
         {
@@ -657,7 +758,15 @@ std::string SysYIRGenerator::evaluateConstExp(SysYParser::ConstExpContext *conte
         if (auto n = dynamic_cast<SysYParser::NumberPrimaryExpContext *>(ctx))
         {
             std::string s = normalizeIntLiteral(n->number()->getText());
-            return std::stoll(s);
+            try
+            {
+                return std::stoll(s);
+            }
+            catch (...)
+            {
+                // 非法数字文本时兜底为0，避免崩溃
+                return 0;
+            }
         }
         if (auto lv = dynamic_cast<SysYParser::LValPrimaryExpContext *>(ctx))
         {
@@ -667,7 +776,14 @@ std::string SysYIRGenerator::evaluateConstExp(SysYParser::ConstExpContext *conte
                 std::string irv = c->getIRValue(); // "i32 <num>"
                 auto pos = irv.find(' ');
                 std::string num = pos != std::string::npos ? irv.substr(pos + 1) : irv;
-                return std::stoll(num);
+                try
+                {
+                    return std::stoll(num);
+                }
+                catch (...)
+                {
+                    return 0;
+                }
             }
             // 非常量标识符：兜底
             return 0;

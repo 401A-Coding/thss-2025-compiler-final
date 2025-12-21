@@ -58,9 +58,17 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
 {
     // 函数名
     std::string funcName = "@" + context->IDENT()->getText();
-    // 解析形参并登记函数符号
+    // 解析返回类型
     std::string rawName = context->IDENT()->getText();
-    auto retTy = IntType::getInstance();
+    std::shared_ptr<Type> retTy;
+    {
+        int tokType = context->funcType()->getStart()->getType();
+        if (tokType == SysYLexer::VOID)
+            retTy = VoidType::getInstance();
+        else
+            retTy = IntType::getInstance();
+    }
+    // 解析形参并登记函数符号
     std::vector<std::shared_ptr<Type>> paramTypes;
     std::vector<std::string> paramDecls; // 用于函数头部：如"i32 %arg_a"
     if (context->funcFParams())
@@ -86,7 +94,7 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
     symTab->insertSymbol(fSym);
     currentFuncSym = fSym;
 
-    // 返回类型：当前示例支持返回int
+    // 返回类型
     std::string retIRType = retTy->toIRString();
 
     // 含参数的函数头部
@@ -119,6 +127,11 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
     // 访问函数体 block
     visit(context->block());
 
+    // 若为void函数，且尚未显式return，则补充ret void
+    if (retIRType == "void")
+    {
+        irBuilder->createReturn("", "void");
+    }
     // 结束基本块与函数
     irBuilder->endBasicBlock();
     irBuilder->endFunction();
@@ -413,12 +426,22 @@ std::any SysYIRGenerator::visitReturnStmt(SysYParser::ReturnStmtContext *context
     // 若有返回表达式，计算其常量值
     if (context->exp())
     {
-        std::string val = evaluateExp(context->exp()); // 纯数字字符串，如"3"
-        irBuilder->createReturn(val, "i32");
+        std::string val = evaluateExp(context->exp()); // 纯数字字符串或SSA
+        std::string retTy = currentFuncSym && currentFuncSym->getFuncType() ? currentFuncSym->getFuncType()->getReturnType()->toIRString() : "i32";
+        // 对于void函数忽略返回表达式（简单容错：仍生成ret void）
+        if (retTy == "void")
+        {
+            irBuilder->createReturn("", "void");
+        }
+        else
+        {
+            irBuilder->createReturn(val, retTy);
+        }
     }
     else
     {
-        irBuilder->createReturn("", "void");
+        std::string retTy = currentFuncSym && currentFuncSym->getFuncType() ? currentFuncSym->getFuncType()->getReturnType()->toIRString() : "void";
+        irBuilder->createReturn("", retTy);
     }
     return {};
 }

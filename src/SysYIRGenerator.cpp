@@ -302,7 +302,8 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
     if (context->funcFParams())
     {
         auto fps = context->funcFParams();
-        // 逐个形参解析类型与名称（数组形参衰减为指针 i32*）
+        // 逐个形参解析类型与名称
+        // 规则：形如 int a[][N] → 参数类型为指向 [N x i32] 的指针；若仅为 [] → i32*
         for (size_t i = 0;; ++i)
         {
             auto fp = fps->funcFParam(i);
@@ -312,8 +313,36 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
             std::shared_ptr<Type> pty;
             if (fp->arrayDim())
             {
-                // SysY: 数组形参按C规则衰减为指向首元素的指针
-                pty = std::make_shared<PointerType>(IntType::getInstance());
+                // 收集除首个空维以外的维度（例如 [] [5] [7] → {5,7}）
+                std::vector<uint64_t> dimsTail;
+                for (size_t di = 0;; ++di)
+                {
+                    auto de = fp->arrayDim()->exp(di);
+                    if (!de)
+                        break;
+                    std::string numText = normalizeIntLiteral(de->getText());
+                    uint64_t n = 0;
+                    try
+                    {
+                        n = static_cast<uint64_t>(std::stoll(numText));
+                    }
+                    catch (...)
+                    {
+                        n = 0; // 兜底
+                    }
+                    dimsTail.push_back(n);
+                }
+                if (dimsTail.empty())
+                {
+                    // 仅 [] → i32*
+                    pty = std::make_shared<PointerType>(IntType::getInstance());
+                }
+                else
+                {
+                    // [] [N] ... → 指向 [N x ... x i32] 的指针
+                    auto arrTy = ArrayType::fromDims(IntType::getInstance(), dimsTail);
+                    pty = std::make_shared<PointerType>(arrTy);
+                }
             }
             else
             {
@@ -993,30 +1022,50 @@ std::any SysYIRGenerator::visitFuncCallUnaryExp(SysYParser::FuncCallUnaryExpCont
 
                         if (vty->isArrayType())
                         {
-                            // 数组作为指针参数：
-                            // 基于数组类型GEP，首索引为0，随后为用户提供的各维下标；
-                            // 若仍未到达最内层元素，则补足零索引直至元素类型为i32，得到i32*。
-                            size_t depth = 0;
-                            std::shared_ptr<Type> t = vty;
-                            while (auto at = std::dynamic_pointer_cast<ArrayType>(t))
-                            {
-                                ++depth;
-                                t = at->getElemType();
-                            }
-
-                            std::string arrTyIR = vty->toIRString();
-                            std::string base = arrTyIR + ", " + arrTyIR + "* " + v->getIRName();
+                            // 数组作为指针参数：根据目标参数类型（pty）的指向类型决定GEP到达层级
+                            std::string varArrTyIR = vty->toIRString();
+                            std::string base = varArrTyIR + ", " + varArrTyIR + "* " + v->getIRName();
                             std::vector<std::string> indices;
-                            indices.push_back("i32 0");
-                            for (size_t k = 0; k < idxCount; ++k)
+                            indices.push_back("i32 0"); // 从数组头开始
+
+                            // 检查参数指针指向类型
+                            auto pPtr = std::dynamic_pointer_cast<PointerType>(pty);
+                            if (pPtr && pPtr->getPointeeType() && pPtr->getPointeeType()->isArrayType())
                             {
-                                std::string iv = evaluateExp(lval->exp(k));
-                                indices.push_back(std::string("i32 ") + iv);
+                                // 目标类型为指向行的指针（如 [N x i32]*）：GEP到行级别
+                                // 使用提供的第一个下标作为行索引；若未提供则为0
+                                if (idxCount >= 1)
+                                {
+                                    std::string iv = evaluateExp(lval->exp(0));
+                                    indices.push_back(std::string("i32 ") + iv);
+                                }
+                                else
+                                {
+                                    indices.push_back("i32 0");
+                                }
+                                // 不深入到元素级别，保证结果类型为 [N x i32]*
                             }
-                            // 需要补充 (depth - idxCount) 个0，使指向最内层元素
-                            for (size_t k = idxCount; k < depth; ++k)
+                            else
                             {
-                                indices.push_back("i32 0");
+                                // 目标类型为 i32*：深入到最内层元素
+                                size_t depth = 0;
+                                std::shared_ptr<Type> t = vty;
+                                while (auto at = std::dynamic_pointer_cast<ArrayType>(t))
+                                {
+                                    ++depth;
+                                    t = at->getElemType();
+                                }
+                                // 追加所有提供的下标
+                                for (size_t k = 0; k < idxCount; ++k)
+                                {
+                                    std::string iv = evaluateExp(lval->exp(k));
+                                    indices.push_back(std::string("i32 ") + iv);
+                                }
+                                // 补齐至元素层级
+                                for (size_t k = idxCount; k < depth; ++k)
+                                {
+                                    indices.push_back("i32 0");
+                                }
                             }
                             std::string ptrSSA = "%var_" + std::to_string(getNextVarId());
                             irBuilder->createGEP(ptrSSA, base, indices);
@@ -1173,19 +1222,42 @@ std::any SysYIRGenerator::visitLValPrimaryExp(SysYParser::LValPrimaryExpContext 
             }
             else if (ty->isPointerType())
             {
-                // 指针变量：先load得到 i32*，再对其做GEP，无首0索引
+                // 指针变量：根据指向类型进行GEP
                 std::string loaded = "%var_" + std::to_string(getNextVarId());
                 irBuilder->createLoad(loaded, v->getIRName(), ty->toIRString());
-                std::vector<std::string> indices;
-                // 仅支持一维索引，使用第一个下标
-                std::string iv0 = evaluateExp(lval->exp(0));
-                indices.push_back(std::string("i32 ") + iv0);
-                std::string elemPtr = "%var_" + std::to_string(getNextVarId());
-                std::string base = std::string("i32, i32* ") + loaded;
-                irBuilder->createGEP(elemPtr, base, indices);
-                std::string dst = "%var_" + std::to_string(getNextVarId());
-                irBuilder->createLoad(dst, elemPtr, "i32");
-                return std::any(dst);
+
+                auto pPtr = std::dynamic_pointer_cast<PointerType>(ty);
+                auto pointee = pPtr ? pPtr->getPointeeType() : nullptr;
+                if (pointee && pointee->isArrayType())
+                {
+                    // 指向数组类型（如 [N x i32]*）：按提供的各维下标进行GEP，无首0索引
+                    std::string arrTyIR = pointee->toIRString();
+                    std::string base = arrTyIR + ", " + arrTyIR + "* " + loaded;
+                    std::vector<std::string> indices;
+                    for (size_t i = 0; i < idxCount; ++i)
+                    {
+                        std::string iv = evaluateExp(lval->exp(i));
+                        indices.push_back(std::string("i32 ") + iv);
+                    }
+                    std::string elemPtr = "%var_" + std::to_string(getNextVarId());
+                    irBuilder->createGEP(elemPtr, base, indices);
+                    std::string dst = "%var_" + std::to_string(getNextVarId());
+                    irBuilder->createLoad(dst, elemPtr, "i32");
+                    return std::any(dst);
+                }
+                else
+                {
+                    // 指向标量（i32*）：使用一维GEP
+                    std::vector<std::string> indices;
+                    std::string iv0 = evaluateExp(lval->exp(0));
+                    indices.push_back(std::string("i32 ") + iv0);
+                    std::string elemPtr = "%var_" + std::to_string(getNextVarId());
+                    std::string base = std::string("i32, i32* ") + loaded;
+                    irBuilder->createGEP(elemPtr, base, indices);
+                    std::string dst = "%var_" + std::to_string(getNextVarId());
+                    irBuilder->createLoad(dst, elemPtr, "i32");
+                    return std::any(dst);
+                }
             }
             else
             {

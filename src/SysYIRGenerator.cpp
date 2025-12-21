@@ -1150,9 +1150,10 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
 
     if (varSym->isGlobalVar())
     {
-        // 当前测试均为局部数组；为稳妥，保留标量全局常量初始化处理
+        // 全局变量初始化
         if (dims.empty())
         {
+            // 标量：尝试折叠为常量数字
             std::any iv = visit(context->initVal());
             std::string initVal = iv.has_value() ? std::any_cast<std::string>(iv) : context->initVal()->getText();
             std::string constVal = normalizeIntLiteral(initVal);
@@ -1160,8 +1161,111 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
         }
         else
         {
-            // 全局数组默认零初始化
-            irBuilder->createGlobalVar(varSym->getIRName(), vty->toIRString(), "zeroinitializer");
+            // 全局数组：展开 initVal 生成嵌套 initializer；若含非常量则退化为0
+            auto product = [](const std::vector<uint64_t> &ds) -> uint64_t
+            { return std::accumulate(ds.begin(), ds.end(), (uint64_t)1, [](uint64_t a, uint64_t b)
+                                     { return a * b; }); };
+            uint64_t total = product(dims);
+
+            // 扁平化 initVal，遵循行主序与组补齐规则
+            std::vector<std::string> flat;
+            std::function<void(SysYParser::InitValContext *, size_t)> flattenG = [&](SysYParser::InitValContext *ivc, size_t level)
+            {
+                if (!ivc)
+                    return;
+                if (auto expIv = dynamic_cast<SysYParser::ExpInitValContext *>(ivc))
+                {
+                    // 尝试解析为纯数字文本（避免生成SSA）；若失败则以0代替
+                    std::string text = expIv->exp()->getText();
+                    std::string num = normalizeIntLiteral(text);
+                    flat.push_back(num);
+                    return;
+                }
+                if (auto arrIv = dynamic_cast<SysYParser::ArrayInitValContext *>(ivc))
+                {
+                    auto subCapFrom = [&](size_t lv)
+                    {
+                        uint64_t cap = 1;
+                        for (size_t i = lv; i < dims.size(); ++i)
+                            cap *= dims[i];
+                        return cap;
+                    };
+                    size_t idx = 0;
+                    for (;; ++idx)
+                    {
+                        auto child = arrIv->initVal(idx);
+                        if (!child)
+                            break;
+                        if (dynamic_cast<SysYParser::ArrayInitValContext *>(child) != nullptr)
+                        {
+                            size_t before = flat.size();
+                            flattenG(child, level + 1);
+                            size_t after = flat.size();
+                            uint64_t expected = subCapFrom(level + 1);
+                            uint64_t produced = (after >= before) ? (after - before) : 0;
+                            while (produced < expected)
+                            {
+                                flat.push_back("0");
+                                ++produced;
+                            }
+                        }
+                        else
+                        {
+                            flattenG(child, level);
+                        }
+                    }
+                }
+            };
+
+            flattenG(context->initVal(), 0);
+            while (flat.size() < total)
+                flat.push_back("0");
+            if (flat.size() > total)
+                flat.resize(total);
+
+            // 步长（行主序）
+            std::vector<uint64_t> stride(dims.size(), 1);
+            for (int i = (int)dims.size() - 2; i >= 0; --i)
+                stride[i] = stride[i + 1] * dims[i + 1];
+
+            // 生成嵌套 initializer 字符串
+            auto innerTypeFrom = [&](size_t level) -> std::string
+            {
+                if (level >= dims.size() - 1)
+                    return std::string("i32");
+                std::vector<uint64_t> sub(dims.begin() + level + 1, dims.end());
+                return ArrayType::fromDims(currentType, sub)->toIRString();
+            };
+
+            std::function<std::string(size_t, uint64_t)> buildInit = [&](size_t level, uint64_t offset) -> std::string
+            {
+                if (level == dims.size() - 1)
+                {
+                    std::string s = "[ ";
+                    for (uint64_t i = 0; i < dims[level]; ++i)
+                    {
+                        if (i)
+                            s += ", ";
+                        s += std::string("i32 ") + flat[offset + i];
+                    }
+                    s += " ]";
+                    return s;
+                }
+                std::string innerTy = innerTypeFrom(level);
+                std::string s = "[ ";
+                for (uint64_t i = 0; i < dims[level]; ++i)
+                {
+                    if (i)
+                        s += ", ";
+                    uint64_t childOff = offset + i * stride[level];
+                    s += innerTy + " " + buildInit(level + 1, childOff);
+                }
+                s += " ]";
+                return s;
+            };
+
+            std::string initIR = buildInit(0, 0);
+            irBuilder->createGlobalVar(varSym->getIRName(), vty->toIRString(), initIR);
         }
     }
     else
@@ -1289,19 +1393,12 @@ std::any SysYIRGenerator::visitExpInitVal(SysYParser::ExpInitValContext *context
 // constInitVal: constExp # ConstExpInitVal
 std::any SysYIRGenerator::visitConstExpInitVal(SysYParser::ConstExpInitValContext *context)
 {
-    // 仅支持标量常量；通过访问表达式以获得已规范化的数字
-    std::any vAny = visit(context->constExp()->addExp());
-    if (vAny.has_value())
-    {
-        try
-        {
-            return vAny;
-        }
-        catch (const std::bad_any_cast &)
-        {
-        }
-    }
-    return std::any(normalizeIntLiteral(context->constExp()->addExp()->getText()));
+    // 仅支持标量常量；对常量表达式进行常量折叠，避免生成SSA
+    // 计算得到形如 "i32 <num>" 的字符串，再提取纯数字部分
+    std::string irConst = evaluateConstExp(context->constExp());
+    auto pos = irConst.find(' ');
+    std::string num = pos != std::string::npos ? irConst.substr(pos + 1) : irConst;
+    return std::any(num);
 }
 
 // 将整数文本规范化为十进制：支持0x(十六进制)、0(八进制)与十进制

@@ -15,11 +15,25 @@ void IRBuilder::startModule()
 
 void IRBuilder::startFunction(const std::string &funcIRType, const std::string &funcIRName)
 {
+    // 无参版本委托到带参版本，传空参数列表
+    startFunction(funcIRType, funcIRName, {});
+}
+
+void IRBuilder::startFunction(const std::string &funcIRType, const std::string &funcIRName, const std::vector<std::string> &paramDecls)
+{
     inFunction = true;
     inBasicBlock = false;
     bbTerminated = false;
-    // 拼接函数定义开头（如define i32 @main() {）
-    irBuffer += "define " + funcIRType + " " + funcIRName + "() {\n";
+    // 构造参数字符串
+    std::string args;
+    for (size_t i = 0; i < paramDecls.size(); ++i)
+    {
+        if (i)
+            args += ", ";
+        args += paramDecls[i];
+    }
+    // 拼接函数定义开头（如define i32 @main(i32 %a) {）
+    irBuffer += "define " + funcIRType + " " + funcIRName + "(" + args + ") {\n";
 }
 
 void IRBuilder::startBasicBlock(const std::string &bbName)

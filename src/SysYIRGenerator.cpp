@@ -58,25 +58,63 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
 {
     // 函数名
     std::string funcName = "@" + context->IDENT()->getText();
-    // 在符号表中登记该函数（当前仅支持int返回、无参）
-    // 注意：FunctionSymbol 的 IR 名称为 "@" + 原始名，因此插入时传入原始名。
+    // 解析形参并登记函数符号
+    std::string rawName = context->IDENT()->getText();
+    auto retTy = IntType::getInstance();
+    std::vector<std::shared_ptr<Type>> paramTypes;
+    std::vector<std::string> paramDecls; // 用于函数头部：如"i32 %arg_a"
+    if (context->funcFParams())
     {
-        std::string rawName = context->IDENT()->getText();
-        auto retTy = IntType::getInstance();
-        std::vector<std::shared_ptr<Type>> params; // 任务场景：不带参数
-        auto fType = std::make_shared<FunctionType>(retTy, params);
-        auto fSym = std::make_shared<FunctionSymbol>(rawName, fType, /*isSysLib=*/false);
-        symTab->insertSymbol(fSym);
-        currentFuncSym = fSym;
+        auto fps = context->funcFParams();
+        // 逐个形参解析类型与名称
+        for (size_t i = 0;; ++i)
+        {
+            auto fp = fps->funcFParam(i);
+            if (!fp)
+                break;
+            std::string pname = fp->IDENT()->getText();
+            // 仅支持int标量参数；如存在arrayDim则暂不展开（可后续扩展为指针）
+            auto pty = IntType::getInstance();
+            paramTypes.push_back(pty);
+            paramDecls.push_back(pty->toIRString() + " %arg_" + pname);
+        }
     }
-    // 返回类型：当前示例仅需支持返回int
-    std::string retIRType = "i32";
 
-    irBuilder->startFunction(retIRType, funcName);
+    // 建立函数符号并插入符号表
+    auto fType = std::make_shared<FunctionType>(retTy, paramTypes);
+    auto fSym = std::make_shared<FunctionSymbol>(rawName, fType, /*isSysLib=*/false);
+    symTab->insertSymbol(fSym);
+    currentFuncSym = fSym;
+
+    // 返回类型：当前示例支持返回int
+    std::string retIRType = retTy->toIRString();
+
+    // 含参数的函数头部
+    irBuilder->startFunction(retIRType, funcName, paramDecls);
     irBuilder->startBasicBlock("entry");
 
-    // 进入函数作用域
+    // 进入函数作用域，并将形参作为局部变量（alloca+store来自形参值）
     symTab->enterScope();
+    if (!paramDecls.empty())
+    {
+        for (size_t i = 0; i < paramTypes.size(); ++i)
+        {
+            // 形参名
+            auto fps = context->funcFParams();
+            auto fp = fps->funcFParam(i);
+            if (!fp)
+                break;
+            std::string pname = fp->IDENT()->getText();
+            // 为形参创建局部变量符号
+            uint64_t id = getNextVarId();
+            auto varSym = std::make_shared<VariableSymbol>(pname, paramTypes[i], /*isGlobal=*/false, id);
+            symTab->insertSymbol(varSym);
+            // 分配并初始化为传入的参数值（%arg_<name>）
+            irBuilder->createAlloca(varSym->getIRName(), paramTypes[i]->toIRString());
+            std::string argSSA = "%arg_" + pname;
+            irBuilder->createStore(argSSA, varSym->getIRName(), paramTypes[i]->toIRString());
+        }
+    }
 
     // 访问函数体 block
     visit(context->block());
@@ -206,6 +244,18 @@ std::string SysYIRGenerator::toI1FromIntLike(const std::string &val)
     irBuilder->createICmp(dst, "ne", val, "0");
     registerI1(dst);
     return dst;
+}
+
+// 将i1 SSA值扩展为i32以参与数值比较/计算
+std::string SysYIRGenerator::ensureI32(const std::string &val)
+{
+    if (i1Values.count(val))
+    {
+        std::string dst = "%var_" + std::to_string(getNextVarId());
+        irBuilder->createZExt(dst, "i1", val, "i32");
+        return dst;
+    }
+    return val;
 }
 
 // cond: lOrExp # CondLOrExp
@@ -346,6 +396,10 @@ std::any SysYIRGenerator::visitBinaryEqExp(SysYParser::BinaryEqExpContext *conte
     std::any rvAny = visit(context->relExp());
     std::string lhs = lvAny.has_value() ? std::any_cast<std::string>(lvAny) : context->eqExp()->getText();
     std::string rhs = rvAny.has_value() ? std::any_cast<std::string>(rvAny) : context->relExp()->getText();
+
+    // 统一到i32再做相等性比较
+    lhs = ensureI32(lhs);
+    rhs = ensureI32(rhs);
 
     std::string cmp = context->EQ() ? "eq" : "ne";
     std::string i1 = "%var_" + std::to_string(getNextVarId());
@@ -499,8 +553,10 @@ std::any SysYIRGenerator::visitUnaryOpExp(SysYParser::UnaryOpExpContext *context
     else
     {
         // 逻辑非：!x => (x == 0) ? 1 : 0
+        // 若val为i1，先扩展为i32，便于统一比较
+        std::string val32 = ensureI32(val);
         std::string cmp = "%var_" + std::to_string(getNextVarId());
-        irBuilder->createICmp(cmp, "eq", val, "0"); // i1
+        irBuilder->createICmp(cmp, "eq", val32, "0"); // i1
         std::string dst = "%var_" + std::to_string(getNextVarId());
         irBuilder->createZExt(dst, "i1", cmp, "i32");
         return std::any(dst);

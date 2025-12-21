@@ -83,6 +83,8 @@ private:
     std::string normalizeIntLiteral(const std::string &text);
     // 将整数或SSA值转为条件i1：val != 0
     std::string toI1FromIntLike(const std::string &val);
+    // 若为i1 SSA则零扩展为i32，否则原样返回（用于比较/算术统一到i32）
+    std::string ensureI32(const std::string &val);
     // 记录某SSA名为i1类型（icmp/phi结果）
     void registerI1(const std::string &ssaName) { i1Values.insert(ssaName); }
     // 查找符号并转换为对应类型

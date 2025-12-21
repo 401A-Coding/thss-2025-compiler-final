@@ -13,6 +13,8 @@ public:
     void startModule();
     // 函数级操作：开始定义函数（如define i32 @main() {）
     void startFunction(const std::string &funcIRType, const std::string &funcIRName);
+    // 带参数的函数定义（如define i32 @add(i32 %a, i32 %b) {）
+    void startFunction(const std::string &funcIRType, const std::string &funcIRName, const std::vector<std::string> &paramDecls);
     // 基本块操作：开始基本块（如entry:）
     void startBasicBlock(const std::string &bbName = "entry");
     // 结束基本块（若未有终结指令，自动补上 unreachable）

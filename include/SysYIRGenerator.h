@@ -34,7 +34,7 @@ public:
     // 代码块与语句
     std::any visitBlock(SysYParser::BlockContext *context) override;
     std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
-    // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
+    std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
     // std::any visitBreakStmt(SysYParser::BreakStmtContext *context) override;
     // std::any visitContinueStmt(SysYParser::ContinueStmtContext *context) override;
     std::any visitReturnStmt(SysYParser::ReturnStmtContext *context) override;

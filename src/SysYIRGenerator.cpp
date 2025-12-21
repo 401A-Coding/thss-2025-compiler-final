@@ -129,6 +129,33 @@ std::any SysYIRGenerator::visitIfStmt(SysYParser::IfStmtContext *context)
     return {};
 }
 
+std::any SysYIRGenerator::visitWhileStmt(SysYParser::WhileStmtContext *context)
+{
+    // 基本块命名
+    std::string condBB = getNextBBName("while_cond");
+    std::string bodyBB = getNextBBName("while_body");
+    std::string endBB = getNextBBName("while_end");
+
+    // 进入循环：跳到条件块
+    irBuilder->createBr(condBB);
+
+    // 条件块
+    irBuilder->startBasicBlock(condBB);
+    std::any cAny = visit(context->cond());
+    std::string condIR = cAny.has_value() ? std::any_cast<std::string>(cAny) : toI1FromIntLike(context->cond()->getText());
+    irBuilder->createCondBr(condIR, bodyBB, endBB);
+
+    // 循环体
+    irBuilder->startBasicBlock(bodyBB);
+    visit(context->stmt());
+    // 回到条件块
+    irBuilder->createBr(condBB);
+
+    // 结束块
+    irBuilder->startBasicBlock(endBB);
+    return {};
+}
+
 // 将整数或SSA值转为条件i1：val != 0
 std::string SysYIRGenerator::toI1FromIntLike(const std::string &val)
 {

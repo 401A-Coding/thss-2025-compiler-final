@@ -24,6 +24,8 @@ public:
 
     // 全局变量声明（如@var_0 = constant i32 10, align 4）
     std::string createGlobalVar(const std::string &varIRName, const std::string &typeIR, const std::string &initIRValue);
+    // 全局常量声明（如@const_0 = constant i32 10, align 4）
+    std::string createGlobalConst(const std::string &constIRName, const std::string &typeIR, const std::string &initIRValue);
     // 局部变量分配（如%var_1 = alloca i32, align 4）
     std::string createAlloca(const std::string &varIRName, const std::string &typeIR);
     // 存储指令（如store i32 1, i32* %var_1, align 4）

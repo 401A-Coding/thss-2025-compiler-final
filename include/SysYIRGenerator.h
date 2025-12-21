@@ -6,6 +6,7 @@
 #include "IR.h"
 #include <stack>
 #include <unordered_map>
+#include <unordered_set>
 
 class SysYIRGenerator : public SysYParserBaseVisitor
 {
@@ -32,7 +33,7 @@ public:
 
     // 代码块与语句
     std::any visitBlock(SysYParser::BlockContext *context) override;
-    // std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
+    std::any visitIfStmt(SysYParser::IfStmtContext *context) override;
     // std::any visitWhileStmt(SysYParser::WhileStmtContext *context) override;
     // std::any visitBreakStmt(SysYParser::BreakStmtContext *context) override;
     // std::any visitContinueStmt(SysYParser::ContinueStmtContext *context) override;
@@ -53,6 +54,17 @@ public:
     std::any visitExpInitVal(SysYParser::ExpInitValContext *context) override;
     std::any visitConstExpInitVal(SysYParser::ConstExpInitValContext *context) override;
 
+    // 条件/逻辑/关系/相等表达式（用于条件求值）
+    std::any visitCondLOrExp(SysYParser::CondLOrExpContext *context) override;
+    std::any visitLAndLOrExp(SysYParser::LAndLOrExpContext *context) override;
+    std::any visitBinaryLOrExp(SysYParser::BinaryLOrExpContext *context) override;
+    std::any visitEqLAndExp(SysYParser::EqLAndExpContext *context) override;
+    std::any visitBinaryLAndExp(SysYParser::BinaryLAndExpContext *context) override;
+    std::any visitAddRelExp(SysYParser::AddRelExpContext *context) override;
+    std::any visitBinaryRelExp(SysYParser::BinaryRelExpContext *context) override;
+    std::any visitRelEqExp(SysYParser::RelEqExpContext *context) override;
+    std::any visitBinaryEqExp(SysYParser::BinaryEqExpContext *context) override;
+
 private:
     // 生成唯一变量ID（避免IR名称冲突）
     uint64_t getNextVarId() { return ++varIdCounter; }
@@ -69,6 +81,10 @@ private:
     std::string evaluateExp(SysYParser::ExpContext *context);
     // 规范化整数文本：支持十六进制(0x..)与八进制(0..)，返回十进制字符串
     std::string normalizeIntLiteral(const std::string &text);
+    // 将整数或SSA值转为条件i1：val != 0
+    std::string toI1FromIntLike(const std::string &val);
+    // 记录某SSA名为i1类型（icmp/phi结果）
+    void registerI1(const std::string &ssaName) { i1Values.insert(ssaName); }
     // 查找符号并转换为对应类型
     template <typename T>
     std::shared_ptr<T> findSymbol(const std::string &name) const
@@ -92,6 +108,8 @@ private:
     using PhiVarMap = std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>>;
     // 嵌套控制流的phi变量映射栈（支持嵌套if/while）
     std::stack<PhiVarMap> phiVarStack;
+    // 已知的i1 SSA变量集合
+    std::unordered_set<std::string> i1Values;
 
     // 辅助方法：记录变量在当前路径的赋值
     void recordPhiVar(const std::string &varName, const std::string &valIR, const std::string &bbName);

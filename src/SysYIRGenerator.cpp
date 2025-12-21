@@ -48,7 +48,8 @@ std::any SysYIRGenerator::visitConstDef(SysYParser::ConstDefContext *context)
     // 若为全局作用域，生成一个全局常量定义方便后续 load（或直接作为符号被引用）
     if (symTab->isGlobalScope())
     {
-        irBuilder->createGlobalVar(cSym->getIRName(), currentType->toIRString(), initVal);
+        // 全局常量应使用 constant 声明
+        irBuilder->createGlobalConst(cSym->getIRName(), currentType->toIRString(), initVal);
     }
     return {};
 }
@@ -87,6 +88,204 @@ std::any SysYIRGenerator::visitBlock(SysYParser::BlockContext *context)
     // 退出块作用域
     symTab->exitScope();
     return r;
+}
+
+std::any SysYIRGenerator::visitIfStmt(SysYParser::IfStmtContext *context)
+{
+    // 生成基本块名称
+    std::string thenBB = getNextBBName("then");
+    std::string elseBB = getNextBBName("else");
+    std::string mergeBB = getNextBBName("endif");
+
+    // 计算条件：生成 i1 值（支持逻辑与/或、关系/相等）
+    std::any cAny = visit(context->cond());
+    std::string condIR = cAny.has_value() ? std::any_cast<std::string>(cAny) : toI1FromIntLike(context->cond()->getText());
+
+    // 条件跳转（若无 else，则 false 分支直接跳到 merge）
+    if (context->ELSE())
+    {
+        irBuilder->createCondBr(condIR, thenBB, elseBB);
+    }
+    else
+    {
+        irBuilder->createCondBr(condIR, thenBB, mergeBB);
+    }
+
+    // then 分支
+    irBuilder->startBasicBlock(thenBB);
+    visit(context->stmt(0));
+    irBuilder->createBr(mergeBB);
+
+    if (context->ELSE())
+    {
+        // else 分支
+        irBuilder->startBasicBlock(elseBB);
+        visit(context->stmt(1));
+        irBuilder->createBr(mergeBB);
+    }
+
+    // 合并基本块
+    irBuilder->startBasicBlock(mergeBB);
+    return {};
+}
+
+// 将整数或SSA值转为条件i1：val != 0
+std::string SysYIRGenerator::toI1FromIntLike(const std::string &val)
+{
+    // 已是i1则直接返回
+    if (i1Values.count(val))
+        return val;
+    // 将整数/数值布尔(i32) 转为 i1：val != 0
+    std::string dst = "%var_" + std::to_string(getNextVarId());
+    irBuilder->createICmp(dst, "ne", val, "0");
+    registerI1(dst);
+    return dst;
+}
+
+// cond: lOrExp # CondLOrExp
+std::any SysYIRGenerator::visitCondLOrExp(SysYParser::CondLOrExpContext *context)
+{
+    return visit(context->lOrExp()); // 期望返回 i1 SSA 名称
+}
+
+// lOrExp: lAndExp # LAndLOrExp
+std::any SysYIRGenerator::visitLAndLOrExp(SysYParser::LAndLOrExpContext *context)
+{
+    std::any v = visit(context->lAndExp());
+    std::string iv = v.has_value() ? std::any_cast<std::string>(v) : context->lAndExp()->getText();
+    // 确保得到 i1
+    std::string i1 = toI1FromIntLike(iv);
+    return std::any(i1);
+}
+
+// lOrExp: lOrExp OR lAndExp # BinaryLOrExp
+std::any SysYIRGenerator::visitBinaryLOrExp(SysYParser::BinaryLOrExpContext *context)
+{
+    // 短路：若左为真，直接为真，否则计算右
+    std::string rhsBB = getNextBBName("or_rhs");
+    std::string trueBB = getNextBBName("or_true");
+    std::string mergeBB = getNextBBName("or_merge");
+
+    // 左侧条件（转为 i1）
+    std::any lvAny = visit(context->lOrExp());
+    std::string lVal = lvAny.has_value() ? std::any_cast<std::string>(lvAny) : context->lOrExp()->getText();
+    std::string lI1 = toI1FromIntLike(lVal);
+    irBuilder->createCondBr(lI1, trueBB, rhsBB);
+
+    // 右侧分支
+    irBuilder->startBasicBlock(rhsBB);
+    std::any rvAny = visit(context->lAndExp());
+    std::string rVal = rvAny.has_value() ? std::any_cast<std::string>(rvAny) : context->lAndExp()->getText();
+    std::string rI1 = toI1FromIntLike(rVal);
+    irBuilder->createBr(mergeBB);
+
+    // 左侧为真分支
+    irBuilder->startBasicBlock(trueBB);
+    irBuilder->createBr(mergeBB);
+
+    // 合并：phi i1 [ 1, trueBB ], [ rI1, rhsBB ]
+    irBuilder->startBasicBlock(mergeBB);
+    std::string dst = "%var_" + std::to_string(getNextVarId());
+    irBuilder->createPhi(dst, "i1", {{"1", trueBB}, {rI1, rhsBB}});
+    registerI1(dst);
+    return std::any(dst);
+}
+
+// lAndExp: eqExp # EqLAndExp
+std::any SysYIRGenerator::visitEqLAndExp(SysYParser::EqLAndExpContext *context)
+{
+    std::any v = visit(context->eqExp());
+    std::string iv = v.has_value() ? std::any_cast<std::string>(v) : context->eqExp()->getText();
+    std::string i1 = toI1FromIntLike(iv);
+    return std::any(i1);
+}
+
+// lAndExp: lAndExp AND eqExp # BinaryLAndExp
+std::any SysYIRGenerator::visitBinaryLAndExp(SysYParser::BinaryLAndExpContext *context)
+{
+    // 短路：若左为假，直接为假，否则计算右
+    std::string rhsBB = getNextBBName("and_rhs");
+    std::string falseBB = getNextBBName("and_false");
+    std::string mergeBB = getNextBBName("and_merge");
+
+    // 左侧 i1
+    std::any lvAny = visit(context->lAndExp());
+    std::string lVal = lvAny.has_value() ? std::any_cast<std::string>(lvAny) : context->lAndExp()->getText();
+    std::string lI1 = toI1FromIntLike(lVal);
+    irBuilder->createCondBr(lI1, rhsBB, falseBB);
+
+    // 右侧分支
+    irBuilder->startBasicBlock(rhsBB);
+    std::any rvAny = visit(context->eqExp());
+    std::string rVal = rvAny.has_value() ? std::any_cast<std::string>(rvAny) : context->eqExp()->getText();
+    std::string rI1 = toI1FromIntLike(rVal);
+    irBuilder->createBr(mergeBB);
+
+    // 左侧为假分支
+    irBuilder->startBasicBlock(falseBB);
+    irBuilder->createBr(mergeBB);
+
+    // 合并：phi i1 [ 0, falseBB ], [ rI1, rhsBB ]
+    irBuilder->startBasicBlock(mergeBB);
+    std::string dst = "%var_" + std::to_string(getNextVarId());
+    irBuilder->createPhi(dst, "i1", {{"0", falseBB}, {rI1, rhsBB}});
+    registerI1(dst);
+    return std::any(dst);
+}
+
+// relExp: addExp # AddRelExp
+std::any SysYIRGenerator::visitAddRelExp(SysYParser::AddRelExpContext *context)
+{
+    std::any v = visit(context->addExp());
+    if (v.has_value())
+        return v;
+    return std::any(context->addExp()->getText());
+}
+
+// relExp: relExp (LT|GT|LE|GE) addExp # BinaryRelExp
+std::any SysYIRGenerator::visitBinaryRelExp(SysYParser::BinaryRelExpContext *context)
+{
+    std::any lvAny = visit(context->relExp());
+    std::any rvAny = visit(context->addExp());
+    std::string lhs = lvAny.has_value() ? std::any_cast<std::string>(lvAny) : context->relExp()->getText();
+    std::string rhs = rvAny.has_value() ? std::any_cast<std::string>(rvAny) : context->addExp()->getText();
+
+    std::string cmp;
+    if (context->LT())
+        cmp = "slt";
+    else if (context->GT())
+        cmp = "sgt";
+    else if (context->LE())
+        cmp = "sle";
+    else
+        cmp = "sge";
+
+    // icmp -> i1（逻辑层使用）
+    std::string i1 = "%var_" + std::to_string(getNextVarId());
+    irBuilder->createICmp(i1, cmp, lhs, rhs);
+    registerI1(i1);
+    return std::any(i1);
+}
+
+// eqExp: relExp # RelEqExp
+std::any SysYIRGenerator::visitRelEqExp(SysYParser::RelEqExpContext *context)
+{
+    return visit(context->relExp()); // 返回 addExp的i32或比较产生的i1
+}
+
+// eqExp: eqExp (EQ|NEQ) relExp # BinaryEqExp
+std::any SysYIRGenerator::visitBinaryEqExp(SysYParser::BinaryEqExpContext *context)
+{
+    std::any lvAny = visit(context->eqExp());
+    std::any rvAny = visit(context->relExp());
+    std::string lhs = lvAny.has_value() ? std::any_cast<std::string>(lvAny) : context->eqExp()->getText();
+    std::string rhs = rvAny.has_value() ? std::any_cast<std::string>(rvAny) : context->relExp()->getText();
+
+    std::string cmp = context->EQ() ? "eq" : "ne";
+    std::string i1 = "%var_" + std::to_string(getNextVarId());
+    irBuilder->createICmp(i1, cmp, lhs, rhs);
+    registerI1(i1);
+    return std::any(i1);
 }
 
 std::any SysYIRGenerator::visitReturnStmt(SysYParser::ReturnStmtContext *context)

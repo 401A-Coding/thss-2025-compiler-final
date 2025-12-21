@@ -65,12 +65,20 @@ void IRBuilder::endModule()
     // 拼接模块尾部
 }
 
-// 全局变量声明：如@var_0 = constant i32 10, align 4
+// 全局变量声明：如@var_0 = global i32 10, align 4
 std::string IRBuilder::createGlobalVar(const std::string &varIRName, const std::string &typeIR, const std::string &initIRValue)
 {
-    std::string instr = varIRName + " = constant " + typeIR + " " + initIRValue + ", align 4\n";
+    std::string instr = varIRName + " = global " + typeIR + " " + initIRValue + ", align 4\n";
     irBuffer += indent() + instr;
     return varIRName;
+}
+
+// 全局常量声明：如@const_0 = constant i32 10, align 4
+std::string IRBuilder::createGlobalConst(const std::string &constIRName, const std::string &typeIR, const std::string &initIRValue)
+{
+    std::string instr = constIRName + " = constant " + typeIR + " " + initIRValue + ", align 4\n";
+    irBuffer += indent() + instr;
+    return constIRName;
 }
 
 // 局部变量分配：如%var_1 = alloca i32, align 4

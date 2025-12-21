@@ -58,8 +58,19 @@ std::any SysYIRGenerator::visitFuncDef(SysYParser::FuncDefContext *context)
 {
     // 函数名
     std::string funcName = "@" + context->IDENT()->getText();
-    // 返回类型：根据标签 IntFuncType/VoidFuncType
-    std::string retIRType = "i32"; // 任务要求仅需支持返回int
+    // 在符号表中登记该函数（当前仅支持int返回、无参）
+    // 注意：FunctionSymbol 的 IR 名称为 "@" + 原始名，因此插入时传入原始名。
+    {
+        std::string rawName = context->IDENT()->getText();
+        auto retTy = IntType::getInstance();
+        std::vector<std::shared_ptr<Type>> params; // 任务场景：不带参数
+        auto fType = std::make_shared<FunctionType>(retTy, params);
+        auto fSym = std::make_shared<FunctionSymbol>(rawName, fType, /*isSysLib=*/false);
+        symTab->insertSymbol(fSym);
+        currentFuncSym = fSym;
+    }
+    // 返回类型：当前示例仅需支持返回int
+    std::string retIRType = "i32";
 
     irBuilder->startFunction(retIRType, funcName);
     irBuilder->startBasicBlock("entry");

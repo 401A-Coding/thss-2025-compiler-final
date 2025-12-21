@@ -49,6 +49,7 @@ void IRBuilder::startBasicBlock(const std::string &bbName)
     }
     inBasicBlock = true;
     bbTerminated = false;
+    currentBBName = bbName;
     // 拼接基本块标签（如entry:）
     irBuffer += indent() + bbName + ":\n";
 }

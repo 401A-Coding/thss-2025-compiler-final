@@ -306,7 +306,9 @@ std::any SysYIRGenerator::visitBinaryLOrExp(SysYParser::BinaryLOrExpContext *con
     std::any rvAny = visit(context->lAndExp());
     std::string rVal = rvAny.has_value() ? std::any_cast<std::string>(rvAny) : context->lAndExp()->getText();
     std::string rI1 = toI1FromIntLike(rVal);
+    // 记录右侧路径实际到达merge的前驱基本块名称（可能为右侧内部的merge块）
     irBuilder->createBr(mergeBB);
+    std::string rhsIncoming = irBuilder->getCurrentBBName();
 
     // 左侧为真分支
     irBuilder->startBasicBlock(trueBB);
@@ -315,7 +317,7 @@ std::any SysYIRGenerator::visitBinaryLOrExp(SysYParser::BinaryLOrExpContext *con
     // 合并：phi i1 [ 1, trueBB ], [ rI1, rhsBB ]
     irBuilder->startBasicBlock(mergeBB);
     std::string dst = "%var_" + std::to_string(getNextVarId());
-    irBuilder->createPhi(dst, "i1", {{"1", trueBB}, {rI1, rhsBB}});
+    irBuilder->createPhi(dst, "i1", {{"1", trueBB}, {rI1, rhsIncoming}});
     registerI1(dst);
     return std::any(dst);
 }
@@ -699,7 +701,7 @@ std::any SysYIRGenerator::visitVarDefNoInit(SysYParser::VarDefNoInitContext *con
     }
     else
     {
-        // 全局未初始化，默认为0
+        // 全局未初始化，默认为0（常量）
         irBuilder->createGlobalVar(varSym->getIRName(), currentType->toIRString(), "0");
     }
     return {};
@@ -717,8 +719,11 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
     std::string initVal = iv.has_value() ? std::any_cast<std::string>(iv) : context->initVal()->getText();
     if (varSym->isGlobalVar())
     {
-        // 生成全局变量定义
-        irBuilder->createGlobalVar(varSym->getIRName(), currentType->toIRString(), initVal);
+        // 全局变量初始化必须是常量：对表达式文本进行规范化（支持+/-前缀与十/十六/八进制）
+        std::string initText = context->initVal()->getText();
+        std::string constVal = normalizeIntLiteral(initText);
+        // 生成全局变量定义（使用纯常量）
+        irBuilder->createGlobalVar(varSym->getIRName(), currentType->toIRString(), constVal);
     }
     else
     {

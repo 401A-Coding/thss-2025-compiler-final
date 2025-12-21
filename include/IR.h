@@ -60,12 +60,16 @@ public:
     // 清空缓冲区（用于多函数生成）
     void clearBuffer() { irBuffer.clear(); }
 
+    // 获取当前基本块名称（用于生成正确的phi前驱标签）
+    std::string getCurrentBBName() const { return currentBBName; }
+
 private:
     std::string moduleName;    // 模块名称
     std::string irBuffer;      // 存储拼接后的IR字符串
     bool inFunction;           // 是否处于函数定义中
     bool inBasicBlock;         // 是否处于基本块中
     bool bbTerminated = false; // 当前基本块是否已有终结指令
+    std::string currentBBName; // 当前基本块名称
 
     // 辅助：添加缩进（增强IR可读性，可选）
     std::string indent() const;

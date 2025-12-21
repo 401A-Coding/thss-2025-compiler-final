@@ -30,6 +30,9 @@ public:
     std::string createGlobalConst(const std::string &constIRName, const std::string &typeIR, const std::string &initIRValue);
     // 局部变量分配（如%var_1 = alloca i32, align 4）
     std::string createAlloca(const std::string &varIRName, const std::string &typeIR);
+    // 局部变量分配到函数入口基本块（避免在循环体内重复分配导致栈溢出）
+    // 注意：仅在函数体内有效，指令会被插入到entry块标签之后。
+    std::string createAllocaInEntry(const std::string &varIRName, const std::string &typeIR);
     // 存储指令（如store i32 1, i32* %var_1, align 4）
     std::string createStore(const std::string &valueIR, const std::string &ptrIRName, const std::string &typeIR);
     // 加载指令（如%var_2 = load i32, i32* %var_1, align 4）
@@ -78,6 +81,11 @@ private:
     bool inBasicBlock;         // 是否处于基本块中
     bool bbTerminated = false; // 当前基本块是否已有终结指令
     std::string currentBBName; // 当前基本块名称
+    // 记录需要插入到entry块开头的指令（例如alloca），用于避免在循环体中分配栈空间
+    std::string entryPrologueBuffer;
+    bool entryBlockStarted = false;
+    // 记录当前函数entry块标签后的插入位置，允许随时插入到entry块顶部
+    size_t entryInsertOffset = 0;
 
     // 辅助：添加缩进（增强IR可读性，可选）
     std::string indent() const;

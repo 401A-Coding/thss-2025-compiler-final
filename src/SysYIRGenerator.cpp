@@ -974,48 +974,90 @@ std::any SysYIRGenerator::visitFuncCallUnaryExp(SysYParser::FuncCallUnaryExpCont
                 break;
             if (pty->isPointerType())
             {
-                // 指针参数：支持传入数组或指针变量
-                std::string text = argExp->getText();
-                if (auto v = findSymbol<VariableSymbol>(text))
+                // 指针参数：尽量从lVal提取地址，支持数组衰减与指针偏移
+                SysYParser::LValContext *lval = extractLVal(argExp);
+                if (lval)
                 {
-                    auto vty = v->getType();
-                    // 若为数组类型：衰减为指向首元素的 i32*（通过GEP 0,0,...）
-                    if (vty->isArrayType())
+                    // lVal形参：IDENT [exp]*
+                    std::string vname = lval->IDENT()->getText();
+                    if (auto v = findSymbol<VariableSymbol>(vname))
                     {
-                        // 统计维度深度
-                        size_t depth = 0;
-                        std::shared_ptr<Type> t = vty;
-                        while (auto at = std::dynamic_pointer_cast<ArrayType>(t))
+                        std::shared_ptr<Type> vty = v->getType();
+                        // 统计lVal提供的下标数
+                        size_t idxCount = 0;
+                        for (;; ++idxCount)
                         {
-                            ++depth;
-                            t = at->getElemType();
+                            if (!lval->exp(idxCount))
+                                break;
                         }
-                        std::string baseTyIR = vty->toIRString();
-                        std::string base = baseTyIR + ", " + baseTyIR + "* " + v->getIRName();
-                        std::vector<std::string> indices;
-                        indices.push_back("i32 0");
-                        for (size_t i = 0; i < depth; ++i)
+
+                        if (vty->isArrayType())
+                        {
+                            // 数组作为指针参数：
+                            // 基于数组类型GEP，首索引为0，随后为用户提供的各维下标；
+                            // 若仍未到达最内层元素，则补足零索引直至元素类型为i32，得到i32*。
+                            size_t depth = 0;
+                            std::shared_ptr<Type> t = vty;
+                            while (auto at = std::dynamic_pointer_cast<ArrayType>(t))
+                            {
+                                ++depth;
+                                t = at->getElemType();
+                            }
+
+                            std::string arrTyIR = vty->toIRString();
+                            std::string base = arrTyIR + ", " + arrTyIR + "* " + v->getIRName();
+                            std::vector<std::string> indices;
                             indices.push_back("i32 0");
-                        std::string ptrSSA = "%var_" + std::to_string(getNextVarId());
-                        irBuilder->createGEP(ptrSSA, base, indices);
-                        argsIR.push_back(pty->toIRString() + " " + ptrSSA);
-                    }
-                    else if (vty->isPointerType())
-                    {
-                        // 局部指针变量：需先load得到 i32*
-                        std::string loaded = "%var_" + std::to_string(getNextVarId());
-                        irBuilder->createLoad(loaded, v->getIRName(), pty->toIRString());
-                        argsIR.push_back(pty->toIRString() + " " + loaded);
+                            for (size_t k = 0; k < idxCount; ++k)
+                            {
+                                std::string iv = evaluateExp(lval->exp(k));
+                                indices.push_back(std::string("i32 ") + iv);
+                            }
+                            // 需要补充 (depth - idxCount) 个0，使指向最内层元素
+                            for (size_t k = idxCount; k < depth; ++k)
+                            {
+                                indices.push_back("i32 0");
+                            }
+                            std::string ptrSSA = "%var_" + std::to_string(getNextVarId());
+                            irBuilder->createGEP(ptrSSA, base, indices);
+                            argsIR.push_back(pty->toIRString() + " " + ptrSSA);
+                        }
+                        else if (vty->isPointerType())
+                        {
+                            // 指针变量：若有下标，对指针做GEP；否则直接传指针值
+                            std::string loaded = "%var_" + std::to_string(getNextVarId());
+                            irBuilder->createLoad(loaded, v->getIRName(), vty->toIRString());
+                            if (idxCount == 0)
+                            {
+                                argsIR.push_back(pty->toIRString() + " " + loaded);
+                            }
+                            else
+                            {
+                                std::vector<std::string> indices;
+                                // 目前仅支持一维指针偏移，以第一个下标为准
+                                std::string iv0 = evaluateExp(lval->exp(0));
+                                indices.push_back(std::string("i32 ") + iv0);
+                                std::string elemPtr = "%var_" + std::to_string(getNextVarId());
+                                std::string base = std::string("i32, i32* ") + loaded;
+                                irBuilder->createGEP(elemPtr, base, indices);
+                                argsIR.push_back(pty->toIRString() + " " + elemPtr);
+                            }
+                        }
+                        else
+                        {
+                            // 非数组/指针，兜底为null
+                            argsIR.push_back(pty->toIRString() + " null");
+                        }
                     }
                     else
                     {
-                        // 非数组/指针，兜底为null
+                        // 未找到符号：兜底null
                         argsIR.push_back(pty->toIRString() + " null");
                     }
                 }
                 else
                 {
-                    // 兜底：传0指针
+                    // 非lVal形参：兜底传null（当前不支持从一般表达式构造指针）
                     argsIR.push_back(pty->toIRString() + " null");
                 }
             }
@@ -1199,8 +1241,8 @@ std::any SysYIRGenerator::visitVarDefNoInit(SysYParser::VarDefNoInitContext *con
 
     if (!varSym->isGlobalVar())
     {
-        // 局部：alloca i32 或 数组类型
-        irBuilder->createAlloca(varSym->getIRName(), vty->toIRString());
+        // 局部：在函数入口块分配（避免循环体内反复alloca导致栈溢出）
+        irBuilder->createAllocaInEntry(varSym->getIRName(), vty->toIRString());
     }
     else
     {
@@ -1249,10 +1291,9 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
         // 全局变量初始化
         if (dims.empty())
         {
-            // 标量：尝试折叠为常量数字
-            std::any iv = visit(context->initVal());
-            std::string initVal = iv.has_value() ? std::any_cast<std::string>(iv) : context->initVal()->getText();
-            std::string constVal = normalizeIntLiteral(initVal);
+            // 标量：直接基于文本进行常量折叠，避免生成SSA
+            std::string initText = context->initVal()->getText();
+            std::string constVal = normalizeIntLiteral(initText);
             irBuilder->createGlobalVar(varSym->getIRName(), vty->toIRString(), constVal);
         }
         else
@@ -1366,8 +1407,8 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
     }
     else
     {
-        // 局部：alloca 数组或标量
-        irBuilder->createAlloca(varSym->getIRName(), vty->toIRString());
+        // 局部：在函数入口块分配（避免循环体内反复alloca导致栈溢出）
+        irBuilder->createAllocaInEntry(varSym->getIRName(), vty->toIRString());
 
         if (dims.empty())
         {
@@ -1657,4 +1698,44 @@ std::string SysYIRGenerator::generatePhiForVar(const std::string &varName, const
     // 清空该变量的phi记录
     phiVarStack.top().erase(varName);
     return phiVar;
+}
+
+// 尝试从一般表达式中提取 lVal（仅当表达式为纯 lVal 或括号包裹的 lVal）
+SysYParser::LValContext *SysYIRGenerator::extractLVal(SysYParser::ExpContext *expCtx)
+{
+    if (!expCtx)
+        return nullptr;
+    // exp -> addExp
+    auto expAdd = dynamic_cast<SysYParser::ExpAddExpContext *>(expCtx);
+    if (!expAdd)
+        return nullptr;
+    SysYParser::AddExpContext *addCtx = expAdd->addExp();
+    if (!addCtx)
+        return nullptr;
+    // addExp -> mulExp （只接受 MulAddExp 形态，排除二元加减）
+    auto mulAdd = dynamic_cast<SysYParser::MulAddExpContext *>(addCtx);
+    if (!mulAdd)
+        return nullptr;
+    SysYParser::MulExpContext *mulCtx = mulAdd->mulExp();
+    if (!mulCtx)
+        return nullptr;
+    // mulExp -> unaryExp （只接受 UnaryMulExp 形态，排除二元乘除模）
+    auto uMul = dynamic_cast<SysYParser::UnaryMulExpContext *>(mulCtx);
+    if (!uMul)
+        return nullptr;
+    SysYParser::UnaryExpContext *unaryCtx = uMul->unaryExp();
+    if (!unaryCtx)
+        return nullptr;
+    // unaryExp -> primaryExp （只接受 PrimaryUnaryExp 形态，排除函数调用与一元运算）
+    auto primUnary = dynamic_cast<SysYParser::PrimaryUnaryExpContext *>(unaryCtx);
+    if (!primUnary)
+        return nullptr;
+    SysYParser::PrimaryExpContext *primCtx = primUnary->primaryExp();
+    if (!primCtx)
+        return nullptr;
+    // primaryExp -> lVal
+    auto lvalPrim = dynamic_cast<SysYParser::LValPrimaryExpContext *>(primCtx);
+    if (!lvalPrim)
+        return nullptr;
+    return lvalPrim->lVal();
 }

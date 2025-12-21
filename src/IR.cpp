@@ -24,6 +24,9 @@ void IRBuilder::startFunction(const std::string &funcIRType, const std::string &
     inFunction = true;
     inBasicBlock = false;
     bbTerminated = false;
+    entryPrologueBuffer.clear();
+    entryBlockStarted = false;
+    entryInsertOffset = 0;
     // 构造参数字符串
     std::string args;
     for (size_t i = 0; i < paramDecls.size(); ++i)
@@ -52,6 +55,20 @@ void IRBuilder::startBasicBlock(const std::string &bbName)
     currentBBName = bbName;
     // 拼接基本块标签（如entry:）
     irBuffer += indent() + bbName + ":\n";
+    // 若是entry块，立即插入入口序言（例如alloca），保证其位于块开头
+    if (bbName == "entry")
+    {
+        entryBlockStarted = true;
+        // 记录entry标签后的位置
+        entryInsertOffset = irBuffer.size();
+        // 刷新之前累计的入口序言
+        if (!entryPrologueBuffer.empty())
+        {
+            irBuffer.insert(entryInsertOffset, entryPrologueBuffer);
+            entryInsertOffset += entryPrologueBuffer.size();
+            entryPrologueBuffer.clear();
+        }
+    }
 }
 
 void IRBuilder::endBasicBlock()
@@ -103,6 +120,26 @@ std::string IRBuilder::createAlloca(const std::string &varIRName, const std::str
         return "";
     std::string instr = varIRName + " = alloca " + typeIR + ", align 4\n";
     irBuffer += indent() + instr;
+    return varIRName;
+}
+
+// 在entry块开头分配局部变量，避免在循环体内反复alloca导致栈空间耗尽
+std::string IRBuilder::createAllocaInEntry(const std::string &varIRName, const std::string &typeIR)
+{
+    if (!inFunction)
+        return "";
+    std::string instr = indent() + varIRName + " = alloca " + typeIR + ", align 4\n";
+    if (entryBlockStarted && entryInsertOffset > 0)
+    {
+        // 已开始entry块，直接插入到记录的位置（块顶部）
+        irBuffer.insert(entryInsertOffset, instr);
+        entryInsertOffset += instr.size();
+    }
+    else
+    {
+        // entry尚未开始，暂存到序言缓冲，待startBasicBlock("entry")时刷新
+        entryPrologueBuffer += instr;
+    }
     return varIRName;
 }
 

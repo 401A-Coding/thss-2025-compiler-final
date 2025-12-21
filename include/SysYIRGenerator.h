@@ -117,4 +117,7 @@ private:
     void recordPhiVar(const std::string &varName, const std::string &valIR, const std::string &bbName);
     // 辅助方法：生成phi指令并替换变量引用
     std::string generatePhiForVar(const std::string &varName, const std::string &mergeBB);
+
+    // 从一般表达式中尝试提取 lVal（仅当表达式为纯 lVal 或括号包裹的 lVal）
+    SysYParser::LValContext *extractLVal(SysYParser::ExpContext *expCtx);
 };

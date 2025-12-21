@@ -38,6 +38,14 @@ public:
     std::string createBinaryOp(const std::string &dstIRName, const std::string &op, const std::string &lhsIR, const std::string &rhsIR);
     // 数组元素指针计算（GEP指令，如%var_4 = getelementptr inbounds [5 x i32], [5 x i32]* %var_1, i32 0, i32 2）
     std::string createGEP(const std::string &dstIRName, const std::string &basePtrIR, const std::vector<std::string> &indicesIR);
+    // 多维数组便捷 GEP：自动拼装基类型与索引（首个索引固定为 0）
+    // 例如：createGEP("%p", "[2 x [3 x i32]", "%arr", {1,2}) →
+    //   %p = getelementptr inbounds [2 x [3 x i32]], [2 x [3 x i32]]* %arr, i32 0, i32 1, i32 2
+    std::string createGEP(const std::string &dstIRName, const std::string &arrayTypeIR, const std::string &ptrIRName, const std::vector<uint64_t> &indices);
+    // 数组分配便捷封装（与 createAlloca 等价，参数为数组类型 IR）
+    std::string createArrayAlloca(const std::string &varIRName, const std::string &arrayTypeIR);
+    // 全局数组声明便捷封装（与 createGlobalVar 等价，参数为数组类型 IR）
+    std::string createGlobalArray(const std::string &varIRName, const std::string &arrayTypeIR, const std::string &initIRValue);
     // 函数调用（如%var_5 = call i32 @add(i32 %var_2, i32 3)）
     std::string createCall(const std::string &dstIRName, const std::string &funcIRName, const std::string &funcTypeIR, const std::vector<std::string> &argsIR);
     // 无条件跳转（如br label %label_1）

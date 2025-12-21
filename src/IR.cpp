@@ -173,6 +173,35 @@ std::string IRBuilder::createGEP(const std::string &dstIRName, const std::string
     return dstIRName;
 }
 
+std::string IRBuilder::createGEP(const std::string &dstIRName, const std::string &arrayTypeIR, const std::string &ptrIRName, const std::vector<uint64_t> &indices)
+{
+    if (!inBasicBlock || bbTerminated)
+        return "";
+    // 基类型与指针："[...], [...]* %ptr"
+    std::string base = arrayTypeIR + ", " + arrayTypeIR + "* " + ptrIRName;
+    // 索引：首个固定 i32 0（数组指针解引用到首元素），后续维度按传入展开
+    std::string idxStr = "i32 0";
+    for (size_t i = 0; i < indices.size(); ++i)
+    {
+        idxStr += ", i32 " + std::to_string(indices[i]);
+    }
+    std::string instr = dstIRName + " = getelementptr inbounds " + base + ", " + idxStr + "\n";
+    irBuffer += indent() + instr;
+    return dstIRName;
+}
+
+std::string IRBuilder::createArrayAlloca(const std::string &varIRName, const std::string &arrayTypeIR)
+{
+    // 与 createAlloca 等价，类型为数组 IR
+    return createAlloca(varIRName, arrayTypeIR);
+}
+
+std::string IRBuilder::createGlobalArray(const std::string &varIRName, const std::string &arrayTypeIR, const std::string &initIRValue)
+{
+    // 与 createGlobalVar 等价，类型为数组 IR
+    return createGlobalVar(varIRName, arrayTypeIR, initIRValue);
+}
+
 std::string IRBuilder::createCall(const std::string &dstIRName, const std::string &funcIRName, const std::string &funcTypeIR, const std::vector<std::string> &argsIR)
 {
     if (!inBasicBlock || bbTerminated)

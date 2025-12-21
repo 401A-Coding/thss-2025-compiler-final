@@ -25,6 +25,8 @@ public:
     virtual bool isNumericType() const { return false; }
     // 检查是否为指针类型（任务1：int*）
     virtual bool isPointerType() const { return false; }
+    // 是否为数组类型（多维数组通过嵌套实现）
+    virtual bool isArrayType() const { return false; }
 
 protected:
     explicit Type(TypeID typeId) : typeId(typeId) {}
@@ -76,6 +78,19 @@ public:
     }
     std::shared_ptr<Type> getElemType() const { return elemType; }
     uint64_t getElemCount() const { return elemCount; }
+    bool isArrayType() const override { return true; }
+
+    // 便捷构造：根据维度列表自外向内构造嵌套数组类型
+    // 例如 dims={2,3} 且 base=int → [2 x [3 x i32]]
+    static std::shared_ptr<Type> fromDims(std::shared_ptr<Type> baseType, const std::vector<uint64_t> &dims)
+    {
+        std::shared_ptr<Type> ty = std::move(baseType);
+        for (auto it = dims.rbegin(); it != dims.rend(); ++it)
+        {
+            ty = std::make_shared<ArrayType>(ty, *it);
+        }
+        return ty;
+    }
 
 private:
     std::shared_ptr<Type> elemType; // 元素类型（如int）

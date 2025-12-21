@@ -124,9 +124,11 @@ std::any SysYIRGenerator::visitConstDef(SysYParser::ConstDefContext *context)
                         auto child = arrIv->constInitVal(idx);
                         if (!child)
                             break;
-                        if (level + 1 <= dims.size())
+                        // 仅当子项本身是数组组时，按下一维容量补齐；标量子项直接追加一个元素
+                        if (dynamic_cast<SysYParser::ConstArrayInitValContext *>(child) != nullptr)
                         {
                             size_t before = flat.size();
+                            // 进入下一维
                             flattenConst(child, level + 1);
                             size_t after = flat.size();
                             uint64_t expected = subCapFrom(level + 1);
@@ -139,7 +141,7 @@ std::any SysYIRGenerator::visitConstDef(SysYParser::ConstDefContext *context)
                         }
                         else
                         {
-                            // 超过维度，按标量处理
+                            // 标量：不按组容量补齐，顺序填充一个元素
                             flattenConst(child, level);
                         }
                     }
@@ -1097,7 +1099,8 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
                         auto child = arrIv->initVal(idx);
                         if (!child)
                             break;
-                        if (level + 1 <= dims.size())
+                        // 仅当子项是数组组时，进入下一维并按组容量补齐；标量子项直接追加一个元素
+                        if (dynamic_cast<SysYParser::ArrayInitValContext *>(child) != nullptr)
                         {
                             // 进入下一维
                             size_t before = flat.size();
@@ -1114,11 +1117,8 @@ std::any SysYIRGenerator::visitVarDefWithInit(SysYParser::VarDefWithInitContext 
                         }
                         else
                         {
-                            // 超过维度，按标量处理
-                            if (auto expChild = dynamic_cast<SysYParser::ExpInitValContext *>(child))
-                                flat.push_back(evaluateExp(expChild->exp()));
-                            else
-                                flatten(child, level);
+                            // 标量：不补齐组容量，顺序填充
+                            flatten(child, level);
                         }
                     }
                 }

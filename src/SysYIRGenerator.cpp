@@ -136,6 +136,10 @@ std::any SysYIRGenerator::visitWhileStmt(SysYParser::WhileStmtContext *context)
     std::string bodyBB = getNextBBName("while_body");
     std::string endBB = getNextBBName("while_end");
 
+    // 记录循环的break/continue目标
+    breakBBs.push(endBB);
+    continueBBs.push(condBB);
+
     // 进入循环：跳到条件块
     irBuilder->createBr(condBB);
 
@@ -153,6 +157,30 @@ std::any SysYIRGenerator::visitWhileStmt(SysYParser::WhileStmtContext *context)
 
     // 结束块
     irBuilder->startBasicBlock(endBB);
+
+    // 退出循环作用域记录
+    breakBBs.pop();
+    continueBBs.pop();
+    return {};
+}
+
+std::any SysYIRGenerator::visitBreakStmt(SysYParser::BreakStmtContext *context)
+{
+    // 跳转到最近循环的end基本块；若不在循环中则忽略
+    if (!breakBBs.empty())
+    {
+        irBuilder->createBr(breakBBs.top());
+    }
+    return {};
+}
+
+std::any SysYIRGenerator::visitContinueStmt(SysYParser::ContinueStmtContext *context)
+{
+    // 跳转到最近循环的条件基本块（继续下一轮判断）；若不在循环中则忽略
+    if (!continueBBs.empty())
+    {
+        irBuilder->createBr(continueBBs.top());
+    }
     return {};
 }
 

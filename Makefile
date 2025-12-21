@@ -11,4 +11,7 @@ clean:
 test:
 	python3 run-test.py
 
+package:
+	python3 package.py
+
 .PHONY: antlr clean test
